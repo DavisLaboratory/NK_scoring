@@ -1,0 +1,565 @@
+---
+title: "Examining NK signature genes in Tirosh et al single cell data"
+author: Momeneh (Sepideh) Foroutan and Joseph Cursons
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    fig_caption: true
+    number_sections: true
+params: 
+  output_dir: "./reports"
+---
+
+
+# Overview and set up
+This document reproduces some of the figures in Cursons et al paper (**A gene signature predicting natural killer cell infiltration and improved survival in melanoma patients**). This includes the analysis of the single cell RNA-seq data from [Tirosh et al](https://www.ncbi.nlm.nih.gov/pubmed/27124452). The single cell data (GSE72056_melanoma_single_cell_revised_v2.txt) were downloaded on 4th of Dec 2018 , and were saved under data folder.
+```{r setup, warning = F, message = F}
+knitr::opts_chunk$set(
+  cache = TRUE, 
+  warning = FALSE, 
+  message = FALSE)
+
+dataPath   <- "../data/"
+scriptPath <- "../script/"
+outPath <- "../output/"
+
+library(data.table)
+library(Seurat)
+library(cowplot)     
+library(RColorBrewer)
+library(limma)
+library(dplyr)
+
+source(paste0(scriptPath, "boxplot_vertical_ggplot.R"))
+
+textSize <- 1.6
+currentTheme <- theme_minimal() +
+  theme(
+    ## Set grids
+    panel.grid.minor = element_blank(),
+    ## Set axis titles
+    axis.title = element_text(size = rel(textSize)),
+    axis.title.x = element_blank(),
+    ## Set axis text
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(angle = 0, size = rel(textSize)),
+    ## Set axis ticks and lines
+    axis.ticks = element_line(),
+    axis.ticks.x = element_blank(),
+    axis.line = element_line(colour = "black"),
+    ## Set background colour and text
+    strip.background = element_rect(colour = "#f0f0f0", fill = "#f0f0f0"),
+    strip.text = element_text(size = rel(textSize)),
+    ## Set legend
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box = "horizontal",
+    legend.title = element_text(face = "italic", size = rel(max(1, textSize * 1.3))),
+    legend.text = element_text(size = rel(max(1, textSize * 1.3))),
+    legend.margin = margin(unit(0, "cm")),
+    legend.key.size = unit(1.5, 'lines'),
+    ## Set plot title
+    plot.title = element_text(
+      face = "bold",
+      size = rel(textSize),
+      hjust = 0.5
+    )
+  )
+```
+
+# Data preparation
+## Prepare NK signature genes and expression data
+We read the signature and map gene symbols to IDs. Here we use the Homo_sapiens.gene_info file from NCBI which is stored under data folder to do the mapping.
+```{r}
+nkSig <- read.csv(paste0(dataPath, "Cursons_Guimaraes_NKsignature_CIR_2019.csv"),
+ stringsAsFactors = F)
+
+nk_signature <- nkSig$HGNC.Symbol
+
+## Make sure that we have updated gene symbols
+nkIDs <- alias2SymbolUsingNCBI(nk_signature, 
+  paste0(dataPath, "Homo_sapiens.gene_info"))
+
+nkIDs <- nkIDs[complete.cases(nkIDs$GeneID), ]
+
+```
+
+We read the single cell RNA-seq data from Tirosh et al. Annotation file in Tirosh et al data has several groups: malignant(1 = no, 2 = yes, and 0 = unresolved), and non-malignant cell type (1 = T, 2 = B, 3 = Macro., 4 = Endo., 5 = CAF, and 6 = NK). 
+We replace numbers with meaningful annotations (e.g. cell types).
+```{r read_clean_data, warning = F, message = F}
+tirosh <- fread(paste0(dataPath, "Tirosh/GSE72056_melanoma_single_cell_revised_v2.txt"))
+
+tannot <- t(tirosh[1:3, 2:ncol(tirosh)])
+colnames(tannot) <- c("Tumour", "Malignant", "Non-malignant")
+tannot <- data.frame(tannot)
+
+tannot$Malignant[tannot$Malignant == 1] <- "No"
+tannot$Malignant[tannot$Malignant == 2] <- "Yes"
+tannot$Malignant[tannot$Malignant == 0] <- "Unresolved"
+
+tannot$Non.malignant[tannot$Non.malignant == 1] <- "T"
+tannot$Non.malignant[tannot$Non.malignant == 2] <- "B"
+tannot$Non.malignant[tannot$Non.malignant == 3] <- "Macro"
+tannot$Non.malignant[tannot$Non.malignant == 4] <- "Endo."
+tannot$Non.malignant[tannot$Non.malignant == 5] <- "CAF"
+tannot$Non.malignant[tannot$Non.malignant == 6] <- "NK"
+
+tirosh <- tirosh[-c(1,2,3), ]
+
+## remove two duplicated genes
+tirosh <- tirosh[! duplicated(tirosh$Cell), ]
+
+rnames <- tirosh$Cell
+tirosh <- as.matrix(tirosh[, 2:ncol(tirosh)])
+row.names(tirosh) <- rnames
+
+```
+
+Check the table comparing malignant and non-malignant cells.
+```{r}
+table(tannot$Malignant,  tannot$Non.malignant)
+```
+
+
+The data are already in RPKM format and are log transformed; therefore we do not do normalisation through Seurat pipeline. We make a Seurat object using this data.
+
+## Generate Seurat object and subset data
+```{r seurat_object}
+## Make a Seurat object
+tirosh <- CreateSeuratObject(raw.data = tirosh,
+  meta.data = tannot , 
+  project = "Tirosh")
+tirosh
+```
+
+We subset data to only have non-malignant cells. We further remove endothelial cells.
+```{r subset_data}
+tt0 <- SubsetData(tirosh, cells.use = rownames(tirosh@meta.data[tirosh@meta.data$Malignant == "No", ]), do.clean = TRUE)
+
+tt <- SubsetData(tt0, cells.use = rownames(tt0@meta.data[ ! tt0@meta.data$Non.malignant == "Endo.", ]), do.clean = TRUE)
+tt
+
+## If data were not normalised
+# tt <- NormalizeData(object = tt, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+We then find the top 1000 most variable genes.
+```{r variable_genes, message = F, warning = F}
+tt <- FindVariableGenes(
+  object = tt, 
+  mean.function = ExpMean, 
+  dispersion.function = LogVMR, 
+  do.plot = FALSE)
+
+hv.genes <- head(rownames(tt@hvg.info), 1000)
+```
+
+There is no mitochondrial genes in the data to remove.
+```{r chekc_mitochondrial_genes}
+mito.genes <- grep(pattern = "^MT-", x = rownames(x = tt@data), value = TRUE)
+mito.genes
+```
+
+From 114 genes in the combined list of NK genes, 7 gene do not present in the expression data.
+```{r missing_genes}
+nkIDs$Symbol[!nkIDs$Symbol %in% row.names(tt@data)]
+```
+
+
+We remove cells with less than 1500 detected genes (n = 1) and more than 10000 genes (n = 14). 
+```{r filter_cells}
+## After removing only malignan cells
+tt0 <- FilterCells(object = tt0, subset.names = c("nGene"), 
+    low.thresholds = c(1500), high.thresholds = c(10000))
+
+## After removing Endo cells too
+tt <- FilterCells(object = tt, subset.names = c("nGene"), 
+    low.thresholds = c(1500), high.thresholds = c(10000))
+```
+
+## Calculate summary stat for NK genes
+We calculate some summary statistics for the NK gene expression, including the mean, median, min, max, the 25%-tile and 75%-tile. This helps to compare the expression of a given gene across different cell types.
+```{r nkGenes_stats}
+nkExpr <- tt0@data[intersect(nkIDs$Symbol, row.names(tt0@data)), ]
+
+## Merge expression data for the combined NK signature genes and annotation data 
+nkExprAnnot <- merge(t(nkExpr), tt0@meta.data, by = "row.names")
+
+## Convert data to long format
+nkExprAnnotLong <-
+  tidyr::gather(nkExprAnnot, Genes, LogTPM, 2:106, factor_key = TRUE)
+
+nkExprAnnotLong$Non.malignant[nkExprAnnotLong$Non.malignant == "0"] <- "NA"
+nkExprAnnotLong$Non.malignant[nkExprAnnotLong$Non.malignant == "Endo."] <- "Endo"
+
+nkExprSummary <- nkExprAnnotLong %>%
+  select(Genes, Non.malignant, LogTPM) %>%
+  group_by(Non.malignant, Genes) %>%
+  mutate(
+  min = min(LogTPM),
+  firstQ = quantile(LogTPM, probs = 0.25),
+  median = median(LogTPM),
+  mean = mean(LogTPM),
+  thirdQ = quantile(LogTPM, probs = 0.75),
+  max = max(LogTPM)
+  ) %>%
+  ungroup() %>%
+  data.frame() 
+
+
+nkExprSummary$Gene_Cell <- paste(
+  nkExprSummary$Genes, 
+  nkExprSummary$Non.malignant,
+  sep = "_") 
+
+nkExprSummary <- nkExprSummary[ 
+  ! duplicated(nkExprSummary$Gene_Cell), ]
+
+write.table(nkExprSummary, paste0(outPath, 
+"NK_CombinedSig_GeneSummary_Tirosh.txt"), sep = "\t", row.names = F)
+```
+
+CD160
+CD244
+CTSW
+FASLG
+GZMA
+GZMB
+GZMH
+IL18RAP
+IL2RB
+KIR2DL4
+KLRB1
+KLRC3
+KLRD1
+KLRF1
+KLRK1
+NCR1
+NKG7
+PRF1
+XCL1
+XCL2
+
+# Data visualisation
+## Boxplots
+For the refined NK signature genes proposed by Cursons et al.
+```{r prepare_data_boxplot}
+nkCursons <- nkSig$HGNC.Symbol[nkSig$Cursons.Guimaraes.sigGene == "TRUE"]
+
+nkExpr <- tt0@data[nkCursons, ]
+nkExprAnnot <- merge(t(nkExpr), tt0@meta.data, by = "row.names")
+
+nkExprAnnotLong <-
+   tidyr::gather(nkExprAnnot, Genes, LogTPM, CD160:XCL2, factor_key = TRUE)
+
+nkExprAnnotLong$Non.malignant[nkExprAnnotLong$Non.malignant == "0"] <- "Unres"
+nkExprAnnotLong$Non.malignant[nkExprAnnotLong$Non.malignant == "Endo."] <- "Endo"
+
+## order genes
+nkExprAnnotLong2 <- nkExprAnnotLong[order(nkExprAnnotLong$Genes, decreasing = T), ]
+nkExprAnnotLong2$Genes <- factor(nkExprAnnotLong2$Genes,
+  levels = unique(as.character(nkExprAnnotLong2$Genes)))
+nkExprAnnotLong2$Non.malignant <- factor(nkExprAnnotLong2$Non.malignant,
+  levels = c("NK", "CAF", "Macro", "T", "B", "Endo", "Unres"))
+
+```
+
+We Generate vertical boxplots to reproduce **Figure 2A** in Cursons et al paper.
+```{r vertical_boxplot, fig.width = 4, fig.height = 8}
+boxplot_vertical_ggplot(
+  data = nkExprAnnotLong2,
+  x.axis.column = "Genes",
+  y.axis.column = "LogTPM",
+  annot.column = "Non.malignant",
+  title = "",
+  cols = brewer.pal(9, "Set1")[c(4, 8, 5, 3, 2, 7, 9)],
+  textSize = 1.3
+  ) +
+  theme(
+  plot.margin = unit(c(2, 0.1, 0.1, 0.1),"cm"),
+  legend.position = c(0.35, 1.05),
+  ## Set legend
+  legend.direction = "horizontal",
+  legend.box = "horizontal",
+  legend.margin = margin(unit(0, "cm")),
+  legend.key.size = unit(1.2, 'lines')
+  )
+```
+
+We can also generate horizontal boxplots, as shown below.
+```{r horizontal_boxplot, fig.wide = T, fig.height= 10}
+ggplot(nkExprAnnotLong2, 
+  aes(x = Non.malignant, 
+    y = LogTPM, 
+    color = Non.malignant)) +
+  geom_boxplot(size = 1) +
+  facet_wrap(~ Genes, ncol = 4) +
+  scale_color_manual(values = brewer.pal(9, "Set1")[c(4, 8, 5, 3, 2, 7, 9)]) +
+  currentTheme
+```
+
+
+## PCA plots
+For the PCA and tSNE plots, we use the data after filtering endothelial cells for better visualisations. This is because Endo cells are very different from the rest of the cell types.
+```{r scale_data_PCA, warning = F, message = F}
+tt <- ScaleData(
+  object = tt, 
+  genes.use = hv.genes, 
+  display.progress = FALSE,
+  # vars.to.regress = "percent.mito", 
+  do.par = TRUE, 
+  num.cores = 6)
+
+```
+
+```{r run_PCA}
+tt <- RunPCA(
+  object = tt, 
+  pc.genes = hv.genes, 
+  pcs.compute = 100, 
+  do.print = FALSE, 
+  pcs.print = 1:5, 
+  genes.print = 5)
+```
+
+```{r pv_elbow_plot}
+PCElbowPlot(object = tt, num.pc = 100)
+```
+
+We select 50 PCs for the downstream analysis. Here are the plots for the first 3 and last 3 PCs from PC 1 to 50.
+```{r top_PCs, fig.wide = TRUE, fig.height = 10}
+PCHeatmap(tt, pc.use = c(1:3, 48:50), cells.use = 500, do.balanced = TRUE) 
+```
+
+
+## tSNE plots
+For resolution, we can use a value above 1.0 to obtain a larger number of communities, or below 1 for smaller number of communities.
+```{r find_clusters}
+tt <- FindClusters(
+  object = tt, 
+  reduction.type = "pca", 
+  dims.use = 1:50, 
+  resolution = 1, 
+  save.SNN = TRUE, 
+  n.start = 100, 
+  # nn.eps = 0.1, 
+  print.output = FALSE)
+
+```
+
+Then we run tSNE using the first 50 PCs, and perplexity of 50.
+```{r run_tSNE, warning = F, message = F}
+set.seed(100)
+tt <- RunTSNE(object = tt,
+  reduction.use = "pca",
+  dims.use = 1:50, 
+  tsne.method = "Rtsne",
+  nthreads = 6,
+  perplexity = 50,
+  max_iter = 2000)
+```
+
+```{r tSNE_plot, fig.width = 7, fig.height = 6}
+
+tt@meta.data$Non.malignant[tt@meta.data$Non.malignant == "0"] <- "Unres"
+tt@meta.data$Non.malignant<- factor(tt@meta.data$Non.malignant, levels = c("NK", "CAF", "Macro", "T", "B", "Unres"))
+
+p1 <- DimPlot(
+  object = tt, 
+  reduction.use = "tsne",
+  cols.use = brewer.pal(8, "Set1")[c(4, 8, 5, 3, 2, 9)],
+  group.by = "Non.malignant", 
+  do.return = TRUE, 
+  vector.friendly = TRUE, 
+  pt.size = 1) + 
+  ggtitle("tSNE") + 
+  guides(color=guide_legend("Cell type")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+p1  
+
+```
+
+
+## UMAP plots
+To select the values for minDist and nNeighbors argument in UMAP plot, we examined different values for these parameters and assessed the resultant UMAP plots. We have commented the codes below as these take quite some time to run; you can uncomment them though and run to see the resultant figures. 
+
+```{r}
+# set.seed(100) 
+# # minDist <- 0.4
+# currentExpr <- tt@data[row.names(tt@data) %in% checkG, ]
+#   
+# minDist <- c(0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
+# nNeighbors <- c(30, 50, 70, 100)
+# 
+# pdf(paste0(outPath, "Tirosh_UMAP_diff_minDist_nNeighbours.pdf"), width = 8, height = 8)
+# for(i in minDist){
+#  for(j in nNeighbors){
+#    
+#    tt <- RunUMAP(
+#     object = tt,
+#     reduction.use = "pca",
+#     dims.use = 1:50,
+#     min_dist = i,
+#     n_neighbors = j
+#     )
+#    
+#   umapData <- data.frame(tt@dr$umap@cell.embeddings)
+#   umapDataGenes <- data.frame(cbind(umapData, t(currentExpr)))
+#   umapDataGenesLong <- tidyr::gather(umapDataGenes, Genes, LogTPM, 3:14)
+#   
+#   umapDataGenesLongArrange <- umapDataGenesLong %>%
+#   group_by(Genes) %>%
+#   arrange(LogTPM) %>%
+#   ungroup() %>%
+#   data.frame()
+# 
+#   umapDataGenesLongArrange$Genes <- factor(umapDataGenesLongArrange$Genes , 
+#   levels = checkG)
+#   
+#   p <-
+#     ggplot(umapDataGenesLongArrange, aes(UMAP1 , UMAP2, colour = LogTPM)) +
+#     geom_point(size = 0.5) +
+#     facet_wrap( ~ Genes, ncol = 3) +
+#     scale_color_gradient(low = "darkorchid4", high = "yellow") +
+#     theme_dark() +
+#     ggtitle(paste("minDist =", i, "; nNeighbour =", j))
+#   
+#   print(p)
+#   
+#  }
+# }
+# dev.off() 
+
+```
+
+According to the plots generated using teh above codes, we choose min_dist = 0.2 and n_neighbors = 50.
+```{r run_final_UMAP, warning = F, message = F}
+set.seed(100)
+  
+i <- 0.2
+j <- 50
+
+tt <- RunUMAP(
+  object = tt,
+  reduction.use = "pca",
+  dims.use = 1:50,
+  min_dist = i,
+  n_neighbors = j
+  )
+```
+
+As we would like to change the default visualisation of Seurat package, we extract the data frame containing the UMAP results and generate our own feature plots. One of the important differences is that we change the order of plotting of cells such that cells with higher expression of a given gene would be plotted at top.
+The codes below reproduce the first set of UMAP panels in **Figure 3** in Cursons et al paper. 
+```{r custom_feature_plots_UMAP, fig.wide = TRUE, fig.height = 8}
+checkG <- c(
+  "CTSW",
+  "CD4",
+  "CD3D",
+  "CD3E",
+  "FCGR3A",
+  "GZMB",
+  "NCR1",
+  "NCAM1",
+  "KLRF1",
+  "XCL1",
+  "XCL2",
+  "FASLG"
+  )
+
+umapData <- data.frame(tt@dr$umap@cell.embeddings)
+
+currentExpr <- tt@data[row.names(tt@data) %in% checkG, ]
+
+##-------------- for different genes in checkG
+umapDataGenes <- data.frame(cbind(umapData, t(currentExpr)))
+umapDataGenesLong <- tidyr::gather(umapDataGenes, Genes, LogTPM, 3:14)
+
+umapDataGenesLongArrange <- umapDataGenesLong %>%
+  group_by(Genes) %>%
+  arrange(LogTPM) %>%
+  mutate(maxVal = round(max(LogTPM), 2)) %>%
+  mutate(minVal = 0) %>%
+  mutate(GenesMax = paste0(Genes, " (max = ", maxVal, ")")) %>%
+  ungroup() %>%
+  data.frame()
+
+umapDataGenesLongArrange$GenesMax[  
+  umapDataGenesLongArrange$GenesMax == "CTSW (max = 9.43)"] <- "Tirosh et al"
+
+umapDataGenesLongArrange$LogTPM[  
+  umapDataGenesLongArrange$GenesMax == "Tirosh et al"] <- 0.1
+    
+umapDataGenesLongArrange$GenesMax <- factor(umapDataGenesLongArrange$GenesMax , 
+levels = c(
+  "Tirosh et al", "CD3D (max = 10.12)", "CD3E (max = 8.39)",
+  "CD4 (max = 8.56)", "GZMB (max = 11.89)", "FCGR3A (max = 9.41)",
+  "FASLG (max = 8.33)", "KLRF1 (max = 8.69)", "NCAM1 (max = 5.72)",
+  "NCR1 (max = 7.77)", "XCL1 (max = 9.12)", "XCL2 (max = 10.49)"
+  ))
+  
+pp <- umapDataGenesLongArrange %>% group_by(GenesMax) %>%
+  do( 
+    plots = ggplot(data = .) + aes(UMAP1 , UMAP2, colour = LogTPM) +
+  geom_point(size = 0.3) +
+  facet_wrap( ~ GenesMax, ncol = 3) +
+  scale_color_gradient(low = "darkorchid4", high = "yellow") +
+  theme_dark() +
+      theme(
+        legend.position = "none",
+    axis.title = element_blank()
+    # , axis.text = element_blank()
+      ))
+  
+gridExtra::grid.arrange(
+  pp$plots[[1]],
+  pp$plots[[2]],
+  pp$plots[[3]],
+  pp$plots[[4]],
+  pp$plots[[5]],
+  pp$plots[[6]],
+  pp$plots[[7]],
+  pp$plots[[8]],
+  pp$plots[[9]],
+  pp$plots[[10]],
+  pp$plots[[11]],
+  pp$plots[[12]],
+  nrow = 3)
+```
+
+Then, we generate a UMAP plot coloued by cell types, so that we can replace the first plot above with this one. 
+```{r cellTypes_UMAP, fig.width = 3.6, fig.height = 3.4}
+umapDataCells <- data.frame(cbind(umapData, tt@meta.data$Non.malignant))
+colnames(umapDataCells)[3] <- "Cells"
+
+ggplot(data = umapDataCells , aes(UMAP1 , UMAP2, colour = Cells)) +
+  geom_point(size = 0.3) +
+  scale_color_manual(values = brewer.pal(9, "Set1")[c(4, 8, 5, 3, 2, 9)]) +
+  theme_bw() +
+  theme(
+  legend.position = c(0.75, 0.85),
+  legend.direction = "horizontal",
+  legend.title = element_blank()
+  # , axis.title = element_blank(),
+  # axis.text = element_blank()
+   
+  ) + 
+  guides(color = guide_legend(
+  override.aes = list(size = 2),
+  keywidth = 0.2,
+  keyheight = 0.2,
+  default.unit = "inch", 
+    ncol = 2
+  ))
+```
+
+# Session information
+We used package from Bioconductor version `r BiocManager::version()`, and the analyses were run using `r version$version.string` or higher. All the packages used in this document are listed below.
+```{r session_info}
+sessionInfo()
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 598px;"></div>

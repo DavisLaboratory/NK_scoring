@@ -1,0 +1,642 @@
+---
+title: "NK signature score and survival analysis"
+author: Momeneh (Sepideh) Foroutan and Joseph Cursons
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    fig_caption: true
+    number_sections: true
+params: 
+  output_dir: "./reports"
+---
+    
+# Overview and set up
+In this document, we aim to reproduce some of the figures in Cursons et al paper (**A gene signature predicting natural killer cell infiltration and improved survival in melanoma patients**). we download the TCGA RNA-seq data for metastatic SKCM samples using [`TCGAbiolink` package](https://academic.oup.com/nar/article/44/8/e71/2465925). Then, using a number of gene expression signatures, and the [`singscore` method](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-018-2435-4), we compare samples' scores, and generate survival curves to compare groups of samples based on their relative scores or expression of some selected genes. 
+
+First, we set the paths, and load required libraries and a custom function (from the script folder).
+
+```{r setup, results = 'hide', message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(
+  cache = TRUE, 
+  warning = FALSE, 
+  message = FALSE)
+
+# You can creat these directories inside R, for example:
+# dir.create("../output")
+
+# outPath    <- "../output/"
+dataPath   <- "../data/"
+scriptPath <- "../script/"
+
+library(TCGAbiolinks)         ## for downloading TCGA data from GDC
+library(singscore)            ## for scoring samples against gene expression signatures
+library(org.Hs.eg.db)         ## for mapping gene IDs
+library(AnnotationDbi)        ## for mapping gene IDs
+library(SummarizedExperiment) ## for working with SummarizedExperiment object
+library(survival)             ## for survival analysis
+library(ggfortify)            ## for visualisation of survival analysis
+library(RColorBrewer)         ## for visualisation of survival analysis
+
+## Load the custom function for generating survival curves
+source(paste0(scriptPath, "Survival_analysis.R"))
+```
+
+We download the TCGA data using the TCGAbiolinks R package. Below are the release date and version of data on the GDC (Data Release 16.0 - March 26, 2019).
+
+```{r GDC_version}
+# get GDC version information
+gdc_info <- getGDCInfo()
+gdc_info
+```
+[Bhuva et al](https://bioconductor.org/packages/release/workflows/html/SingscoreAMLMutations.html) have shown how to download and prepare the data  from GDC to be suitable to be used by the singscore method. Here, we follow similar pipeline, except that for this project we do not filter the data for low expressed genes because we would like to keep genes expressed in immune cells (such as NK cells) which more likely have low expression in cancer samples. Therefore, instead of downloading the TCGA *count* data, we directly download the *FPKM* values from GDC.
+
+There are 367 metastatic SKCM samples (out of 472) SKCM samples. Making a query from GDC, extracting results from it and downloading the data (187 MB) take some time.
+```{r GDC_query, results = 'hide', message = F, warning = F}
+## Make a query
+query_rnaseq <- GDCquery(
+  #getGDCprojects()
+  project = 'TCGA-SKCM',
+  #TCGAbiolinks:::getProjectSummary('TCGA-SKCM')
+  data.category = 'Transcriptome Profiling',
+  data.type = 'Gene Expression Quantification',
+  workflow.type = 'HTSeq - FPKM',
+  # If we are to download the count data
+  # workflow.type = ’HTSeq - Counts’,
+  experimental.strategy = "RNA-Seq",
+  sample.type = "Metastatic"
+)
+
+## extract results of the query
+rnaseq_res <- getResults(query_rnaseq)
+dim(rnaseq_res)
+```
+
+
+```{r GDC_download, results = 'hide', message = F, warning = F}
+dir.create(paste0(dataPath, "GDCdata"))
+gdcpath <- paste0(dataPath, "GDCdata/")
+GDCdownload(query_rnaseq, directory = gdcpath)
+```
+
+Load the downloaded data and save it as `RangedSummarizedExperiment` object (this step also takes some time) using `GDCprepare()` function; it also adds clinical, FFPE and subtype information to samples, and maps row entries to genes. 
+From the 60483 genes, 3653 could not be mapped by GDCprepare. 
+We then filter the FFPE samples (if any) and duplicated gene IDs (if any). In this case, there is no FFPE sample and no duplicated row names.
+```{r GDC_prepare, results = 'hide', message = F, warning = F}
+skcm_se <- GDCprepare(query_rnaseq, directory = gdcpath)
+```
+
+Then we map the ENSG IDs to Entrez IDs using mapIds from `AnnotationDbi` package, we filter genes that do not have any Entrez IDs or have duplicated Entrez IDs. This removes 30878 gene entries, leaving us with 25952 genes. 
+```{r mapIDs, warning = F, message = F}
+
+rowData(skcm_se)$entrezgene <- AnnotationDbi::mapIds(
+  org.Hs.eg.db,
+  keys = rownames(skcm_se),
+  keytype = 'ENSEMBL',
+  column = 'ENTREZID',
+  multiVals = 'asNA'
+)
+
+gene_annot  <-  rowData(skcm_se)
+
+#select genes with mapped Entrez IDs
+keep <- ! is.na(gene_annot$entrezgene)
+
+#select genes with unique Entrez IDs
+dup_entrez <- gene_annot$entrezgene[duplicated(gene_annot$entrezgene)]
+keep <- keep & !gene_annot$entrezgene %in% dup_entrez
+
+skcm_se <- skcm_se[keep, ]
+
+## Change row names to be Entrez IDs
+rownames(skcm_se) <- rowData(skcm_se)$entrezgene
+
+## You can save the data at this stage so that next time you can run from this step
+# saveRDS(skcm_se, paste0(outPath, "TCGA_SKCM_Met_FPKM_SE.RDS"))
+# skcm_se <- readRDS(paste0(outPath, "TCGA_SKCM_Met_FPKM_SE.RDS"))
+```
+
+
+# Score samples
+Now we would like to score samples against several signatures. 
+Here we read in the signatures; these are csv or txt files that have at least a column of gene symbol and a column of gene direction (if applicable). You can read in your own signatures here if you wish. Then we store gene names using different variable names.
+
+The signatures that we read here inclue:\n
+
+* Curated NK signature by [Cursons et al](https://www.biorxiv.org/content/early/2018/08/13/375253).
+
+* Epithelial (Epi) and Mesenchymal (Mes) signatures by [Tan et al](https://www.ncbi.nlm.nih.gov/pubmed/25214461).
+
+* TGFb-induced EMT signature by [Foroutan et al](https://www.ncbi.nlm.nih.gov/pubmed/28119430).
+
+
+```{r read_signatures}
+##------- Read in the NK signature (from Supplementary Table S1)
+nk_signature <- read.csv(paste0(dataPath, "Cursons_Guimaraes_NKsignature_CIR_2019.csv"),
+ stringsAsFactors = F)
+
+nk <- as.character(nk_signature$HGNC.Symbol[nk_signature$Cursons.Guimaraes.sigGene == "TRUE"])
+
+##------- Read in the Epi and Mes signatures
+emt_signature <- read.table(
+  paste0(
+  dataPath,
+  "Thiery_EMTsignature_both_tumour_cellLine_EntrezIDs.txt"
+  ),
+  header = T,
+  sep = "\t"
+  )
+## Extract Epi signature
+epi <- emt_signature$HGNC.symbol[emt_signature$epiMes_tumor == "epi"]
+epi <- as.character(epi[complete.cases(epi)])
+## Extract Mes signature
+mes <- emt_signature$HGNC.symbol[emt_signature$epiMes_tumor == "mes"]
+mes <- as.character(mes[complete.cases(mes)])
+
+##-------- Read in the TGFb-EMT signature
+tgfb_signature <- read.table(paste0(dataPath, 
+  "Foroutan2016_TGFb_EMT_signature_upDown.txt"), 
+                   header = T, sep = "\t")
+## Store up- and down- gene sets separately
+tgfb_up <- as.character(tgfb_signature$Symbol[tgfb_signature$upDown == "up"])
+tgfb_dn <- as.character(tgfb_signature$Symbol[tgfb_signature$upDown == "down"])
+```
+
+The scoring method that we use is a rank-based method; therefore, we rank genes in each sample based on expression aboundance. We use the ranked data in the next step to score samples using singscore method.
+```{r rankGenes, message = F, warning = F}
+rownames(skcm_se) <- rowData(skcm_se)$external_gene_name
+tcgaRank <- rankGenes(assay(skcm_se))
+```
+
+Now, we score samples against four signatures: NK, Epithelial, Mesenchymal and TGFb-EMT.
+```{r score_samples, message = FALSE, warning = FALSE}
+nkScore_tcga <- simpleScore(
+  rankData = tcgaRank,
+  upSet = nk,
+  centerScore = T,
+  knownDirection = T
+  )
+
+epiScore_tcga <- simpleScore(
+  rankData = tcgaRank,
+  upSet = epi,
+  centerScore = T,
+  knownDirection = T
+  )
+
+mesScore_tcga <- simpleScore(
+  rankData = tcgaRank,
+  upSet = mes,
+  centerScore = T,
+  knownDirection = T
+  )
+
+tgfbScore_tcga <- simpleScore(
+  rankData = tcgaRank,
+  upSet = tgfb_up,
+  downSet = tgfb_dn,
+  centerScore = T,
+  knownDirection = T
+  )
+
+epiScore_tcga$sampleID <- 
+  mesScore_tcga$sampleID <- 
+  tgfbScore_tcga$sampleID <- 
+  nkScore_tcga$sampleID <- 
+  skcm_se$sample
+
+```
+
+# Explore the scores
+## Landscape plots
+We would like to plot landscape of NK scores versus epithelial scores; to do this, we use the `plotScoreLandscape` function from `singscore` package. 
+```{r scoreLandscapes, message = F, warning = F, fig.height = 4, fig.width = 5}
+plotScoreLandscape(scoredf1 = epiScore_tcga, 
+                   scoredf2 = nkScore_tcga, 
+                   scorenames = c("Epithelial scores", "NK scores"), 
+                   textSize = 1, 
+                   isInteractive = T,
+                   hexMin = 100)
+```
+We also plot landscape of NK scores versus Mesenchymal scores. There is a positive correlation between NK and Mes scores.
+```{r, message = F, warning = F, fig.height = 4, fig.width = 5}
+plotScoreLandscape(scoredf1 = mesScore_tcga, 
+                   scoredf2 = nkScore_tcga, 
+                   scorenames = c("Mesenchymal scores", "NK scores"), 
+                   textSize = 1, 
+                   isInteractive = T,
+                   hexMin = 100)
+```
+Looking at the landscape of NK scores versus TGFb-EMT scores, there seem to be no associations between these two scores.
+```{r, message = F, warning = F, fig.height = 4, fig.width = 5}
+plotScoreLandscape(scoredf1 = tgfbScore_tcga, 
+                   scoredf2 = nkScore_tcga, 
+                   scorenames = c("TGFb-EMT scores", "NK scores"), 
+                   textSize = 1, 
+                   isInteractive = T,
+                   hexMin = 100)
+```
+However, there is a positive correlation between TGFb-EMT and mesenchymal scores.
+```{r, message = F, warning = F, fig.height = 4, fig.width = 5}
+plotScoreLandscape(scoredf1 = tgfbScore_tcga, 
+                   scoredf2 = mesScore_tcga, 
+                   scorenames = c("TGFb-EMT scores", "Mesenchymal scores"), 
+                   textSize = 1, 
+                   isInteractive = T,
+                   hexMin = 100)
+```
+We would like to have only one data set for all the scores, so we need to merge them. Here we make the score data sets ready to merge. Basically, we only extract the sampleID and scores and re-name the score column to the signature name that we used to score samples.
+```{r oneData_allScores}
+nkScore_tcga <- nkScore_tcga[, c("sampleID", "TotalScore")]
+colnames(nkScore_tcga)[2] <- "NK_scores"
+
+epiScore_tcga <- epiScore_tcga[, c("sampleID", "TotalScore")]
+colnames(epiScore_tcga)[2] <- "Epithelial_scores"
+
+mesScore_tcga <- mesScore_tcga[, c("sampleID", "TotalScore")]
+colnames(mesScore_tcga)[2] <- "Mesenchymal_scores"
+
+tgfbScore_tcga <- tgfbScore_tcga[, c("sampleID", "TotalScore")]
+colnames(tgfbScore_tcga)[2] <- "TGFbEMT_scores"
+```
+
+Now, we merge all the scores to have one single data containing all the scores.
+```{r oneData_allScores2}
+multmerge <- function(data){
+  Reduce(function(x,y) {merge(x, y, by = "sampleID")}, data)
+}
+
+allScores <- multmerge(list(nkScore_tcga, 
+                            epiScore_tcga, 
+                            mesScore_tcga, 
+                            tgfbScore_tcga))
+
+DT::datatable(allScores, filter = "top")
+```
+
+## Signature genes in single samples
+We can also look at the samples with highest or lowest scores for a given signature. For example, in the code below, we look at samples with the highest and lowest NK scores. You can change the "nkScore_tcga" with any other score data obtained from `simpleScore()` function, and accordingly, change the column name, e.g. "NK_scores".
+```{r rankDensity, message = F, warning = F, fig.height = 3.2, fig.width = 5}
+highScore <- row.names(nkScore_tcga)[nkScore_tcga$NK_scores == max(nkScore_tcga$NK_scores)]
+lowScore  <- row.names(nkScore_tcga)[nkScore_tcga$NK_scores == min(nkScore_tcga$NK_scores)]
+
+plotRankDensity(rankData = tcgaRank[, highScore, drop = F], 
+                upSet = nk, 
+                isInteractive = T)
+
+plotRankDensity(rankData = tcgaRank[, lowScore, drop = F], 
+                upSet = nk, 
+                isInteractive = T)
+```
+
+# Survival analysis
+In this section, we look at the associations between different variables and survival outcome. These variables can be one of the below options that stratifies samples for survival analysis:
+
+* **expr** : expression of a gene, will be split based on 33%-tile and 66%-tile (e.g. low, medium, high)\n
+* **score** : score of a single signatre, will be split based on 33%-tile and 66%-tile (low, medium, high)\n
+* **covariate** : A continouse covariate (e.g. age), will be split based on 33%-tile and 66%-tile (low, medium, high)\n
+* **score_expr** : stratifies samples based on scores from a signature (high and low) and expression of a gene (high and low)\n
+* **covariate_expr** : startifies samples according to covariate (age; high and low) and expression of a gene (high and low)\n
+* **score_covariate** : stratifies samples according to scores from a single signature (high and low) and covariate (age; high and low)\n
+* **expr_expr** : stratifies samples according to expression of two genes (high gene1/high gene2, high gene1/low gene2, etc)\n
+* **score_score** : stratifies samples according to scores obtained from two signatures (high score1/high score2, high score1/low score2, etc)
+
+We have defined a function, called `survival_analysis()`, to plot Kaplan-Meier curves given any of the scenarios mentioned above. The inputs to this functions are:\n
+
+1. **data**: a `SummarizedExperiment` object; for example, here we use the TCGA SKCL data that we downloaded using TCGAbiolink package (see above). This is a specific data object in R that stores expression data as well as several meta-data. Therefore, this function can not take a data frame as input at this stage. The `SummarizedExperiment` object needs to further have an `assay` slot called "logFPKM". To learn more about this object and how to construct it, please see [here](https://bioconductor.org/packages/release/bioc/vignettes/SummarizedExperiment/inst/doc/SummarizedExperiment.html).
+2. **stratify**: A character value of one of the above listed options for stratification (e.g. "expr", "score_expr").
+3. **scores**: A data frame with maximum of three columns: one column needs to be called "sample" which has the sample names consistent with sample names in expression data (first argument of teh function), and minimum one or maximum two columns of signature scores, which have "score" as part of their column names. An error will be given if the data has more than two score columns. This argument can be `NULL` if you are not inetersted in the relationship between scores and survival outcome.
+4. **gene**: A character vector containing the names of maximum of two genes. This argument can be `NULL` if you are not inetersted in the relationship between genes and survival outcome.
+5. **covariate**: Name of the column for a covariate; This is the age factor by default. This argument can be `NULL` if you are not inetersted in the relationship between the covariate and survival outcome.
+6. **timeCol**: The name of time column to be used in the survival analysis
+7. **eventCol**: The name of the event column to be used in survival analysis (e.g. vital_status)
+8. **nGroup**: The number of groups for each stratification. Can be 2 or 3. For example, a value of 2 (default) generates two groups of samples with high and low expression for a desired gene/score/covariate, while 3 would stratify samples into three groups of high, low, and medium.
+9. **confInt**: Boolean; if TRUE, the confidence intervals of survival curves are plotted.
+
+First, we prepare different data that we feed into our custom function.
+Note that due to many NAs in the **days_to_death** column, we replace the NAs with info from the **days_to_last_follow_up** and we generate a new time column, called **finalTime**, store it in the meta-data slot of the skcm_se, and use this column as the `timeCol` argument of the `survival_analysis()` function.
+```{r}
+## We need to add logRPKM data frame as a new assay to the exisiting summarizedExperiment object
+assay(skcm_se, "logFPKM") <- log2(assay(skcm_se) + 1)
+  
+## Define a new column for time, which is then used as "timeCol" argument 
+timeSurvived <- colData(skcm_se)$days_to_death
+colData(skcm_se)$finalTime <-
+  ifelse(is.na(timeSurvived),
+         colData(skcm_se)$days_to_last_follow_up,
+         timeSurvived)
+  
+colnames(allScores)[1] <- "sample"
+
+## Define an score data frame which has three columns to be used for the "score" argument
+nk_tgfb_scores <- allScores[, c("sample", "NK_scores", "TGFbEMT_scores")]
+```
+
+This is how the expression and score data sets look like:
+```{r}
+DT::datatable(assay(skcm_se, "logFPKM")[1:10,1:4], filter = "top")
+```
+
+```{r}
+DT::datatable(nk_tgfb_scores, filter = "top")
+```
+
+## Survival curves in Figure 1
+Here, we reproduce the survival curves in figure 1 of the paper. These include the associations between age or age/expresssion of some selected genes with survival.
+Startify samples based on covariate (whose column name is age_at_diagnosis)
+```{r survival_fig1_age, warning = F, message = F}
+survival_analysis (
+  data = skcm_se,
+  stratify = "covariate",
+  scores = NULL,
+  gene = NULL,
+  covariate = "age_at_diagnosis", 
+  timeCol = "finalTime", 
+  eventCol = "vital_status", 
+  nGroup = 3, 
+  confInt = T
+  )
+
+```
+
+Stratify samples based on the expression of the below genes by considering the covariate 
+```{r survival_fig1_genes}
+##----- 
+checkGenes <- c("IFNG", "KLRD1", "IL15", "B2M")
+
+for(g in checkGenes){
+  print(survival_analysis (
+  data = skcm_se,
+  stratify = "covariate_expr",
+  scores = NULL,
+  gene = g,
+  covariate = "age_at_diagnosis", 
+  timeCol = "finalTime", 
+  eventCol = "vital_status", 
+  nGroup = 2, 
+  confInt = T
+  ))
+}
+```
+
+
+## Survival curves in Figure 4
+### Figure 4B
+We first stratify samples based on NK score. Note that although the score data set has two columns of score (NK and TGFb-EMT), the function takes into account only the first column containing scores, because `stratify = "score"`, not `stratify = "score_score"`.
+```{r survival_fig4B_NKscore}
+survival_analysis (
+  data = skcm_se,
+  stratify = "score",
+  scores = nk_tgfb_scores,
+  gene = NULL,
+  covariate = NULL,
+  timeCol = "finalTime", 
+  eventCol = "vital_status", 
+  nGroup = 3, 
+  confInt = T
+  )
+```
+Next, we group samples according to expression of some selected genes.
+```{r  survival_fig4B_expr}
+checkGenes <- c("CD3D", "IL15", "IL2RB", "CD274", "CCL5", "XCL1", "GZMB", "FASLG")
+  
+  # "CD96", "CD3D", "CD8B", "IL15", "IL15RA")
+
+for(g in checkGenes){
+  print(survival_analysis (
+    data = skcm_se,
+    stratify = "expr",
+    scores = NULL,
+    gene = g,
+    covariate = NULL,
+    timeCol = "finalTime", 
+    eventCol = "vital_status", 
+    nGroup = 3, 
+    confInt = T
+    )
+  )
+}
+```
+
+### Figure 4C
+For this figure, we only select samples with high NK scores (66%-tile), then stratify them based on the expression of XCL2 or GZMB (33%-tile and 66%-tile).
+
+```{r}
+currentscoreCol <- "NK_scores"
+
+col_names <- colnames(skcm_se)
+
+newAnnot <- merge(
+  colData(skcm_se),
+  nk_tgfb_scores,
+  by = "sample",
+  sort = F,
+  all.x = T
+  )
+    
+row.names(newAnnot) <- col_names
+upQ_score <- quantile(newAnnot[, currentscoreCol ], prob = 0.66)
+
+highNK_annot <- newAnnot[newAnnot[, currentscoreCol] >= upQ_score, ]
+highNK <- skcm_se[, row.names(highNK_annot)]
+
+colData(highNK) <- highNK_annot
+```
+
+Note that in the R implementation of survival curves through `survival_analysis()` function, we use the **median** value (50th percentile) to separate samples into **two groups** (e.g. high vs low expression), while in the original paper the thresholds are either 33%- and 66%-tile or 40%- and 60%-tile.
+```{r}
+selectedGenes <- c("XCL2", "GZMB")
+for(g in selectedGenes){
+  print(survival_analysis (
+    data = highNK,
+    stratify = "expr",
+    scores = NULL,
+    gene = g,
+    covariate = NULL,
+    timeCol = "finalTime", 
+    eventCol = "vital_status", 
+    nGroup = 2, 
+    confInt = T
+    )
+  )
+}
+```
+
+If we would like to change the threshold to define our two groups slightly different, we can use some parts of code from `survival_analysis()` function and twick them. The below codes demostrate how you could twick the code, such that the two groups are defined based on 33%-tile and 66%-tile, not median value.
+```{r survival_change_th}
+## Set the parameters
+nGroup   <- 2
+timeCol  <- "finalTime"
+eventCol <- "vital_status"
+confInt  <- TRUE
+
+for(g in selectedGenes) {
+  currentData <- highNK[rowData(highNK)$external_gene_name == g,]
+  
+  ##--- if we wanted to use median as threshold:
+  # median_expr <- median(assay(currentData, "logFPKM"))
+  # newAnnot$expr_2status <-
+  #   ifelse(
+  #     assay(currentData1, "logFPKM") >= median_expr,
+  #     paste0("High ", g),
+  #     paste0("Low ", g)
+  #     )
+  
+  ##--- But we want to have 33th and 66th percentiles as threshold, and skip samples falling in between
+  lowQ_expr <- quantile(assay(currentData, "logFPKM"), prob = 0.33)
+  upQ_expr <- quantile(assay(currentData, "logFPKM"), prob = 0.66)
+  
+  
+  highNK_annot$expr_2status[assay(currentData, "logFPKM") >= upQ_expr] <-
+  paste0("High ", g)
+  highNK_annot$expr_2status[assay(currentData, "logFPKM") <= lowQ_expr] <-
+  paste0("Low ", g)
+  highNK_annot$expr_2status[assay(currentData, "logFPKM") < upQ_expr &
+  assay(currentData, "logFPKM") > lowQ_expr] <-
+  NA
+  
+  ## save this new annotation as sample annotation for the data
+  colData(currentData) <- highNK_annot
+  
+  ## remove samples the have expression between 40%- and 60%-tile
+  currentData <-
+  currentData[, complete.cases(colData(currentData)$expr_2status)]
+  
+  mainTitle <- g
+  
+  ##-------- Fit survival curve
+  ## We would like to know how many samples are in each group
+  ## (e.g. high vs low expression)
+  tt <- data.frame(table(colData(currentData)[, "expr_2status"]))
+  tt$Var1 <- as.character(tt$Var1)
+  tt$Freq <- as.character(tt$Freq)
+  
+  ## Add number of samples in each group
+  for (i in 1:nrow(tt)) {
+  colData(currentData)$currentStrata_n[colData(currentData)[, "expr_2status"] == tt$Var1[i]] <-
+  paste0(tt$Var1[i], " (", tt$Freq[i], ")")
+  }
+  
+  fitValues <- survfit(Surv(colData(currentData)[, timeCol],
+  as.numeric(as.factor(
+  colData(currentData)[, eventCol]
+  )) - 1) ~
+  colData(currentData)$currentStrata_n)
+  
+  ss <- survdiff(Surv(colData(currentData)[, timeCol],
+  as.numeric(as.factor(
+  colData(currentData)[, eventCol]
+  )) - 1) ~
+  colData(currentData)$currentStrata_n)
+  
+  ##-------- Calculate p-value
+  ## Note that this does not adjust for any covariates
+  pval <- ifelse (is.na(ss), next, (round(1 - pchisq(
+  ss$chisq, length(ss$n) - 1
+  ), 6)))[[1]]
+  
+  
+  ##-------- Plot survival curve
+  cols <- c(brewer.pal(9, "Set1")[c(2, 3, 4, 5, 7, 8)],
+  brewer.pal(8, "Dark2")[c(8, 1, 4, 6)])
+  
+  p <- autoplot(fitValues, surv.size = 1.5, conf.int = confInt) +
+  scale_color_manual(values = cols) +
+  scale_fill_manual(values = cols) +
+  ggtitle(paste0(mainTitle,
+  # " (Chisq = ", round(ss$chisq, 3),
+  " (p = ", pval, ")")) +
+  ylab("Survival") +
+  xlab("Time") +
+  theme_bw()
+  
+  print(p)
+}
+
+```
+
+
+## Survival curves in Figure 5
+For this figure, we have partitioned samples into two groups: young and old, based on the median age value. Then, we stratified patients according to NK score and TGFb-EMT score.
+
+```{r define_age_data}
+medAge <- round(median(colData(skcm_se)$age_at_diagnosis/365, na.rm = T), 1)
+
+## remove samples without age information
+dat2 <- skcm_se[, complete.cases(colData(skcm_se)$age_at_diagnosis)]
+
+## geenrate two data, one for young and one for old patients
+dat_young <- dat2[, colData(dat2)$age_at_diagnosis/365 < medAge ]
+dat_old <- dat2[, colData(dat2)$age_at_diagnosis/365 > medAge ]
+```
+
+In **younger patients**, the difference between scores is significant.
+```{r survival_young}
+survival_analysis (
+  data = dat_young,
+  stratify = "score_score",
+  scores = nk_tgfb_scores,
+  gene = NULL,
+  covariate = NULL,
+  timeCol = "finalTime", 
+  eventCol = "vital_status", 
+  nGroup = 2, 
+  confInt = T
+  )
+```
+
+
+In **older patients**, the difference does not seem to be significant.
+```{r survival_old}
+survival_analysis (
+  data = dat_old,
+  stratify = "score_score",
+  scores = nk_tgfb_scores,
+  gene = NULL,
+  covariate = NULL,
+  timeCol = "finalTime", 
+  eventCol = "vital_status", 
+  nGroup = 2, 
+  confInt = T
+  )
+```
+
+# Session information
+We used package from Bioconductor version `r BiocManager::version()`, and the analyses were run using `r version$version.string` or higher. All the packages used in this document are listed below.
+```{r}
+sessionInfo()
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 598px;"></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

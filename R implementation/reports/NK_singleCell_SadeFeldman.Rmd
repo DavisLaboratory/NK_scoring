@@ -1,0 +1,352 @@
+---
+title: "Examining NK signature genes in SadeFeldman et al single cell data"
+author: Momeneh (Sepideh) Foroutan and Joseph Cursons
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    fig_caption: true
+    number_sections: true
+params: 
+  output_dir: "./reports"
+---
+# Overview and set up
+This document reproduces some of the figures in Cursons et al paper (**A gene signature predicting natural killer cell infiltration and improved survival in melanoma patients**). This includes the analysis of the single cell RNA-seq data (GSE120575) from [Sade-Feldman et al](https://www.ncbi.nlm.nih.gov/pubmed/30388456). The data were downloaded on 4th of Dec 2018, and saved under the data folder. 
+The data have cells from 48 tumours obtained from 32 metastatic melanoma patients, at the baseline, on treatment and post treatment (checkpoint therapy). Cells are a mix of B cells, T cells (memory, regulatory, exhusted, etc), lymphocytes, DCs, plasma cells and NK cells. However, the NK cell population has not been anotated. 
+
+```{r setup, warning = F, message = F}
+knitr::opts_chunk$set(
+  cache = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  cache.lazy = FALSE)
+
+dataPath   <- "../data/"
+outPath <- "../output/"
+
+library(data.table)
+library(Seurat)
+library(cowplot)     
+library(RColorBrewer)
+library(limma)
+library(dplyr)
+```
+
+# Data preparation
+## Prepare NK signature genes and expression data
+We read the signature and map gene symbols to IDs. Here we use the Homo_sapiens.gene_info file from NCBI which is stored under data folder to do the mapping.
+```{r}
+nkSig <- read.csv(paste0(dataPath, "Cursons_Guimaraes_NKsignature_CIR_2019.csv"),
+ stringsAsFactors = F)
+
+nk_signature <- nkSig$HGNC.Symbol
+
+## Make sure that we have updated gene symbols
+nkIDs <- alias2SymbolUsingNCBI(nk_signature, 
+  paste0(dataPath, "Homo_sapiens.gene_info"))
+
+nkIDs <- nkIDs[complete.cases(nkIDs$GeneID), ]
+
+```
+
+The original data from this paper is very large (~ 4.5 GB). We read the data into R and subset that to have only pre-treated samples, and remove the first row; then we save it as RDS file which can be loaded into R much quicker. 
+The below code shows how we get from the downloaded data to the subset of data that we are interested in. The data is in logTPM format.
+
+We have also downloaded the annotation file for this data from GEO, called GSE120575_patient_ID_single_cells.txt.gz, and saved it as csv file under the data folder.
+```{r}
+# sf <-
+#   fread(
+#   "./data/SadeFelman/GSE120575_Sade_Feldman_melanoma_single_cells_TPM_GEO.txt",
+#   sep = "\t",
+#   header = T,
+
+
+## Subset data to only Pre-treated
+# rnames <- sf[,1]
+# rnames <- rnames[-1, ]
+# ss <- subset(
+#   sf, 
+#   subset = rep(TRUE, nrow(sf)), 
+#   select = grepl("Pre", sf[1,]))
+# 
+# dim(ss)  ## 55738  5928
+
+## Remove first row from data
+# ss <- subset(
+#   ss, 
+#   subset = c(FALSE, rep(TRUE, (nrow(ss)-1))), 
+#   select = rep(TRUE, ncol(ss)))
+
+# ssdf <- as.data.frame(ss)
+# row.names(ssdf) <- rnames$V1
+
+# rnames <- row.names(ssdf)
+# ssdf <- apply(ssdf, 2, as.numeric)
+# row.names(ssdf) <- rnames
+# sfMat <- as.matrix(ssdf)
+
+## Save data for future use
+# saveRDS(ssdf, 
+#   paste0(dataPath, "SadeFeldman/GSE120575_Sade_Feldman_melanoma_single_cells_TPM_Pre_Treated.RDS"))
+```
+
+```{r read_expr}
+sfMat <- readRDS(paste0(dataPath, "SadeFeldman/GSE120575_Sade_Feldman_melanoma_single_cells_TPM_Pre_Treated_Matrix.RDS"))
+```
+
+Prepare annotation file (from GSE120575) by subsetting to the pre-treated samples. The order of samples in the expression is the same as in the annotation file.
+```{r read_annot}
+sfannot <- read.csv(paste0(dataPath, "SadeFeldman/GSE120575_patient_ID_single_cells.csv"), stringsAsFactors = F)
+row.names(sfannot) <- sfannot$title
+sfannot <- sfannot[colnames(sfMat), ]
+
+all(row.names(sfannot) == colnames(sfMat))
+```
+
+It is recommended to filter genes before creating Seurat object. Therefore, we first filter genes, such that we only retain genes with logTPM > 1 in more than three cells.
+```{r filter_genes}
+kp <- rowSums(sfMat > 1) > 3
+sfFilt <- sfMat[kp, ] 
+```
+We creat a Seurat object.
+```{r Seurat_obj}
+ss <- CreateSeuratObject(raw.data = sfFilt,
+  meta.data = sfannot , 
+  project = "Sade-Feldman")
+ss
+```
+
+There are 16 mitochondrial genes in the data. We calculate percentage of mitochondrial genes in the cells and add them to the Seurat object.
+```{r mito_percentage}
+mito.genes <- grep(pattern = "^MT-", x = rownames(x = ss@data), value = TRUE)
+percent.mito <- Matrix::colSums(ss@raw.data[mito.genes, ])/Matrix::colSums(ss@raw.data)
+ss <- AddMetaData(object = ss, metadata = percent.mito, col.name = "percent.mito")
+```
+
+We filter out cells with detected genes < 1000 or > 5000, and cells with more than 0.05 MT genes.
+```{r filter_cells}
+ss <- FilterCells(object = ss, subset.names = c("nGene", "percent.mito"), 
+    low.thresholds = c(1000, -Inf), high.thresholds = c(5000, 0.05))
+```
+
+We skip normalisation step as the data is in logTPM format. Next, we find highly variable genes, and select the top 3550 variable genes. Interestingly, some of these genes are those from NK signature genes.
+```{r find_variable_genes}
+ss <- FindVariableGenes(object = ss, mean.function = ExpMean, dispersion.function = LogVMR, 
+    x.low.cutoff = 0.5, x.high.cutoff = 8, y.cutoff = 1, do.plot = T)
+
+nkCursons <- nkSig$HGNC.Symbol[nkSig$Cursons.Guimaraes.sigGene == "TRUE"]
+
+
+nkIDs$Symbol[nkIDs$Symbol %in% ss@var.genes]
+```
+
+Then, we scale the data by taking into account the nUMI and percentage of mitochondrial genes.
+```{r scale_data}
+ss <- ScaleData(object = ss, vars.to.regress = c("nUMI", "percent.mito"))
+```
+# Data visualisation
+The main aim is to re-generate the UMAP plots in Cursons et al paper.
+## PCA
+We perform PCA, using the highly variable genes.
+```{r run_pca}
+ss <-
+  RunPCA(
+  object = ss,
+  pc.genes = ss@var.genes,
+  do.print = FALSE,
+  pcs.print = 1:5,
+  genes.print = 5
+  )
+```
+
+```{r vis_pcs, fig.wide = TRUE, fig.height = 6}
+VizPCA(object = ss, pcs.use = 1:2)
+```
+
+
+We select the first 20 PCs for the further analysis such as clustering. We then look at the top genes defining the first 6 PCs.
+```{r pc_elbow_plot}
+PCElbowPlot(object = ss)
+```
+
+```{r top_PCs, fig.wide = TRUE, fig.height = 10}
+PCHeatmap(ss, pc.use = c(1:6), cells.use = NULL, do.balanced = TRUE) 
+```
+
+```{r find_cluster}
+ss <- FindClusters(
+  object = ss, 
+  reduction.type = "pca", 
+  dims.use = 1:20, 
+  resolution = 1, 
+  save.SNN = TRUE, 
+  n.start = 100, 
+  # nn.eps = 0.1, 
+  print.output = FALSE)
+```
+
+## UMAP
+To select the values for minDist and nNeighbors argument in UMAP plot, we examined different values for these parameters and assessed the resultant UMAP plots. We have commented the codes below as these take quite some time to run; you can uncomment them though and run to see the resultant figures. 
+```{r}
+# checkG <- c(
+#   "FCGR3A", "CD4", "CD3D", "CD3E",
+#   "NCR1",  "NCAM1",
+#   "KLRF1", "XCL1", "XCL2", 
+#   "GZMB", "FASLG", "CTSW")
+# 
+# set.seed(100)
+# currentExpr <- ss@data[row.names(ss@data) %in% checkG, ]
+#   
+# minDist <- c(0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
+# nNeighbors <- c(30, 50, 70, 100)
+# 
+# pdf(paste0(outPath, "SadeFeldman_UMAP_diff_minDist_nNeighbours.pdf"), width = 8, height = 8)
+# for(i in minDist){
+#  for(j in nNeighbors){
+#    
+#    ss <- RunUMAP(
+#     object = ss,
+#     reduction.use = "pca",
+#     dims.use = 1:20,
+#     min_dist = i,
+#     n_neighbors = j
+#     )
+#    
+#   umapData <- data.frame(ss@dr$umap@cell.embeddings)
+#   umapDataGenes <- data.frame(cbind(umapData, t(currentExpr)))
+#   umapDataGenesLong <- tidyr::gather(umapDataGenes, Genes, LogTPM, CD4:FCGR3A)
+#   
+#   umapDataGenesLongArrange <- umapDataGenesLong %>%
+#   group_by(Genes) %>%
+#   arrange(LogTPM) %>%
+#   ungroup() %>%
+#   data.frame()
+# 
+#   umapDataGenesLongArrange$Genes <- factor(umapDataGenesLongArrange$Genes , 
+#   levels = checkG)
+#   
+#   p <-
+#     ggplot(umapDataGenesLongArrange, aes(UMAP1 , UMAP2, colour = LogTPM)) +
+#     geom_point(size = 0.5) +
+#     facet_wrap( ~ Genes, ncol = 3) +
+#     scale_color_gradient(low = "darkorchid4", high = "yellow") +
+#     theme_dark() +
+#     ggtitle(paste("minDist =", i, "; nNeighbour =", j))
+#   
+#   print(p)
+#   
+#  }
+# }
+# dev.off() 
+```
+
+We look at genes expressed in different blood cell types in order to find out which cell belongs to which cell type. This reproduce the second part of **Figure 3** in Cursons et al paper.
+```{r custom_feature_plots_UMAP, fig.wide = TRUE, fig.height = 8}
+checkG <- c(
+  "CTSW",
+  "CD4",
+  "CD3D",
+  "CD3E",
+  "FCGR3A",
+  "GZMB",
+  "NCR1",
+  "NCAM1",
+  "KLRF1",
+  "XCL1",
+  "XCL2",
+  "FASLG"
+  )
+
+set.seed(100)
+currentExpr <- ss@data[row.names(ss@data) %in% checkG, ]
+  
+i <- 0.1
+j <- 30
+
+ss <- RunUMAP(
+  object = ss,
+  reduction.use = "pca",
+  dims.use = 1:20,
+  min_dist = i,
+  n_neighbors = j
+  )
+
+umapData <- data.frame(ss@dr$umap@cell.embeddings)
+
+##-------------- for different genes
+umapDataGenes <- data.frame(cbind(umapData, t(currentExpr)))
+umapDataGenesLong <- tidyr::gather(umapDataGenes, Genes, LogTPM, 3:14)
+
+umapDataGenesLongArrange <- umapDataGenesLong %>%
+group_by(Genes) %>%
+arrange(LogTPM) %>%
+mutate(maxVal = round(max(LogTPM), 2)) %>%
+mutate(minVal = 0) %>%
+mutate(GenesMax = paste0(Genes, " (max = ", maxVal, ")")) %>%
+ungroup() %>%
+data.frame()
+
+  umapDataGenesLongArrange$GenesMax[  umapDataGenesLongArrange$GenesMax == "CTSW (max = 12.01)"] <- "Sade-Feldman et al"
+
+  umapDataGenesLongArrange$LogTPM[  umapDataGenesLongArrange$GenesMax == "Sade-Feldman et al"] <- 0.1
+  
+umapDataGenesLongArrange$GenesMax <- factor(umapDataGenesLongArrange$GenesMax , 
+levels = c(
+  "Sade-Feldman et al", "CD3D (max = 13.17)", "CD3E (max = 11.71)",
+  "CD4 (max = 11.36)", "GZMB (max = 15.4)", "FCGR3A (max = 12.77)",
+  "FASLG (max = 11.23)", "KLRF1 (max = 11.55)", "NCAM1 (max = 10.04)",
+  "NCR1 (max = 10.42)", "XCL1 (max = 11.75)", "XCL2 (max = 13.3)"
+  ))
+
+pp <- umapDataGenesLongArrange %>% group_by(GenesMax) %>%
+  do( 
+    plots = ggplot(data = .) + aes(UMAP1 , UMAP2, colour = LogTPM) +
+  geom_point(size = 0.3) +
+  facet_wrap( ~ GenesMax, ncol = 3) +
+  scale_color_gradient(low = "darkorchid4", high = "yellow") +
+  theme_dark() +
+      theme(
+        legend.position = "none",
+    axis.title = element_blank()
+    # , axis.text = element_blank()
+      ))
+  
+gridExtra::grid.arrange(
+  pp$plots[[1]],
+  pp$plots[[2]],
+  pp$plots[[3]],
+  pp$plots[[4]],
+  pp$plots[[5]],
+  pp$plots[[6]],
+  pp$plots[[7]],
+  pp$plots[[8]],
+  pp$plots[[9]],
+  pp$plots[[10]],
+  pp$plots[[11]],
+  pp$plots[[12]],
+  nrow = 3)
+```
+
+We generate a UMAP plot, where all genes are coloured the same.
+```{r UMAP_noCol, fig.width = 3.6, fig.height = 3.4}
+ggplot(data = umapData , aes(UMAP1 , UMAP2)) +
+  geom_point(size = 0.3, colour = "darkorchid4") +
+  theme_bw() +
+  theme(
+  axis.title = element_blank()
+  # axis.text = element_blank()
+  ) 
+```
+
+# Session information
+We used package from Bioconductor version `r BiocManager::version()`, and the analyses were run using `r version$version.string` or higher. All the packages used in this document are listed below.
+```{r session_info}
+sessionInfo()
+```
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 598px;"></div>
+
+
+
