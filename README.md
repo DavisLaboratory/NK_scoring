@@ -82,21 +82,53 @@ The authors would like to convey their gratitude to the developers of python lib
 * [numpy](https://www.numpy.org/)
 * [pandas](https://pandas.pydata.org/)
 * [scipy](https://www.scipy.org/)
+A number of small package dependencies are required for mapping gene synonyms; these scripts are available from Joe Cursons (@jcursons) upon request (currently available from a private repository) and they will be made released here over the coming weeks as documentation is added.
 
 ### Script classes
+Please note that this script is not designed to be loaded as a python library, however, to make the workflow more interpretable certain procedures have been defined as functions, split into related classes. At the bottom of the script are functions that will allow you to reproduce figures from the manuscript.
 * PreProc: a series of functions which perform pre-processing on different data sets to make sample accession easier for corresponding subsets of samples etc
    - split_tcga_met_vs_pri()
+      - Process the GDC sample sheet & clinical metadata file to label samples and split primary/metastatic tumours
    - tcga_skcm_rna_data()
+      - Process the TCGA SKCM RSEM normalised RNA-seq data into a dataframe
    - tcga_skcm_data()
+      - Combine the various TCGA SKCM data sets and perform gene set scoring
    - tcga_skcm_classifications()
+      - Load supplementary data tables from the original TCGA SKCM manuscript including the immune gene signature and classifications of immune high/immune low samples
    - tcga_skcm_met_sites()
+      - Load detailed metastatic tumour sites from the TCGA SKCM data
    - lm_mel_data()
+      - Process the LM-MEL microarray data and return a dataframe for later indexing
    - gse60424_data()
+      - Process the Linsley et al data and return a dataframe for later indexing.
    - gse24759_data()
+      - Process the Novershtern et al data and return a dataframe for later indexing.
    - gse24759_subsets()
-   - tcga_histology()
+      - Specify the samples & groups to be retained from the Novershtern et al data and return a dictionary.
    - density_scatters()
+      - Process matched X/Y vectors and calculate the local density of samples for colouring scatter plots
    - refine_NK_signature()
+      - Process results from the differential expression analysis of bulk sorted cells and examine single cell transcript abundance to refine the NK signature genes
+
 * Analyse:
-   - 
+   - split_one_marker_three_partitions()
+      - Split a group of patients across a single marker (gene, gene set score) & examine survival.
+   - split_two_markers_four_partitions()
+      - Split a group of patients across two markers (gene, gene set score) & examine survival.
+   
 * Plot:
+These functions will reproduce figures and tables from the manuscript.
+   - fig_one_and_supp_table_one()
+   - fig_two()
+   - fig_four()
+   - fig_five()
+   - supp_fig_one()
+   - supp_fig_three()
+   - supp_fig_four()
+   - supp_fig_five()
+   - supp_fig_six()
+   - supp_fig_seven()
+   - supp_fig_eight()
+   - supp_fig_nine()
+   - **NB**: Fig. 2A & Fig. 3 (UMAP plots of single cell RNA-seq data) were generated using associated R scripts
+   - **NB**: Supplementary Figure S2 (workflow figure) was created using a graphical editor
