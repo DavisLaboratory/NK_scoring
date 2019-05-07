@@ -11,7 +11,7 @@ For further information please contact:
 ## Overview
 Code in this repository includes contributions from:
 * Joe Cursons (cursons.j (at) wehi.edu.au)
-   - analysis.py :: a python script to perform the majority of analyses and produces figures for the manuscript listed above
+   - analysis.py :: a python script to perform the majority of analyses and produces figures for the associated manuscript. A more detailed overview of the classes and functions within this package is given below
 
 * Momeneh (Sepideh) Foroutan (momeneh.foroutan (at) unimelb.edu.au) 
    - data :: a folder containing extra data used in this analysis
@@ -67,3 +67,36 @@ The authors would like to acknowledge the authors of previous works who have mad
 
    - Novershtern N, *et al*. (2011). Densely interconnected transcriptional circuits control cell states in human hematopoiesis. *Cell*. 144(2): 296-309. DOI: 10.1016/j.cell.2011.01.004
    - Data were downloaded directly from the NCBI gene expression omnibus with accession number: GSE24759
+
+## Python analysis script
+
+### Overview
+The majority of analyses included within the manuscript were performed using a python script (analysis.py). This script also contains the code to produce the published figures.
+
+### Dependencies
+The authors would like to convey their gratitude to the developers of python libraries used in this analysis. In particular:
+* [lifelines](https://lifelines.readthedocs.io/en/latest/)
+   - [GitHub](https://github.com/CamDavidsonPilon/lifelines/)
+* [matplotlib](https://matplotlib.org/)
+* [networkx](https://networkx.github.io/)
+* [numpy](https://www.numpy.org/)
+* [pandas](https://pandas.pydata.org/)
+* [scipy](https://www.scipy.org/)
+
+### Script classes
+* PreProc: a series of functions which perform pre-processing on different data sets to make sample accession easier for corresponding subsets of samples etc
+   - split_tcga_met_vs_pri()
+   - tcga_skcm_rna_data()
+   - tcga_skcm_data()
+   - tcga_skcm_classifications()
+   - tcga_skcm_met_sites()
+   - lm_mel_data()
+   - gse60424_data()
+   - gse24759_data()
+   - gse24759_subsets()
+   - tcga_histology()
+   - density_scatters()
+   - refine_NK_signature()
+* Analyse:
+   - 
+* Plot:
