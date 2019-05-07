@@ -2906,6 +2906,7 @@ class Plot:
 
     def fig_five(flagResult=False):
 
+		# create a list of marker pairs to plot for comparison across the scatter plots ([x, y])
         listMarkersToPlot=[['Epithelial Score', 'NK Score'],
                            ['Mesenchymal Score', 'NK Score'],
                            ['TGF-B EMT Score', 'NK Score'],
@@ -2913,49 +2914,58 @@ class Plot:
                            ['Age (years)', 'NK Score'],
                            ['Age (years)', 'TGF-B EMT Score']
                            ]
+	    # create a corresponding list of tuples with the plot positions (for GridSpec)
         listOfPlotPosTuples = [(0,0),
                                (0,1),
                                (0,2),
                                (1,0),
                                (1,1),
                                (1,2)]
+		# and a corresponding list of sub-figure labels
         listMarkerPairSubPlotLabels = ['(A)', '(B)', '(C)', '(D)', '(E)', '(F)']
 
+		# load the dictionary for primary vs metastatic samples/patients
         dictPatGroups = PreProc.split_tcga_met_vs_pri()
+		# for the patienst with age and only metastatic tumours, create a list with the tumour sample IDs
         listPatsMetTumOnly = dictPatGroups['MetOnlyPatWithAge']
-
         listPatsMetTumOnlySamples = [strPat + '-06' for strPat in listPatsMetTumOnly]
 
         # load the TCGA data as a merged pandas dataframe
         dictTCGASKCM = PreProc.tcga_skcm_data(flagPerformExtraction=False)
         dfTCGA = dictTCGASKCM['df']
 
+		# output the NK score for all samples
         dfTCGA['NK Score'].to_csv(os.path.join(Plot.strOutputFolder, 'SKCM-AllSamples-NKScore.csv'), sep=',',
                           index_label=True, header=True)
-
+		# output the other gene set scores for all samples
         dfTCGA[['Epithelial Score', 'Mesenchymal Score',
                 'TGF-B EMT Score', 'NK Score']].to_csv(
             os.path.join(Plot.strOutputFolder, 'SKCM-AllSamples-GeneSetScores.csv'),
             sep=',',index_label=True, header=True)
 
+		# load data for the metastatic tumour samples
         dfTCGAMets = dfTCGA.loc[listPatsMetTumOnlySamples]
 
+		# output the samples used for this analysis
         dfTCGAPats = pd.DataFrame(data=listPatsMetTumOnlySamples,
                                   columns=['MetOnly.Samples'])
         dfTCGAPats.to_csv(os.path.join(Plot.strOutputFolder, 'SKCM-MetOnlySamples.csv'), sep=',',
                           index_label=None, index=None,
                           header=False)
 
+		# load patient ages and determine the median value for thresholding
         arrayPatientAge = dfTCGAMets['Age'].values.astype(np.float)
-
         numAgeThresh = np.percentile(arrayPatientAge, 50)
 
+		# split patients by above/below this threshold
         arrayIsBelowAgeThresh = arrayPatientAge < numAgeThresh
         listPatientsBelowAgeThresh = dfTCGAMets['Age'].iloc[arrayIsBelowAgeThresh].index.tolist()
         listPatientsAboveAgeThresh = dfTCGAMets['Age'].iloc[~arrayIsBelowAgeThresh].index.tolist()
 
+		# calculate patient age in years
         dfTCGAMets['Age (years)'] = pd.Series(arrayPatientAge/365.25, index=dfTCGAMets.index.tolist())
 
+		# initialise the gridspec for plotting
         arrayGridSpec = matplotlib.gridspec.GridSpec(nrows=2, ncols=3,
                                             left=0.13, right=0.96,
                                             bottom=0.48, top=0.96,
@@ -2964,22 +2974,27 @@ class Plot:
         handFig = plt.figure()
         handFig.set_size_inches(w=6, h=6)
 
+		# for each marekr pair
         for iMarker in range(len(listMarkersToPlot)):
 
             strMarkerOne = listMarkersToPlot[iMarker][0]
             strMarkerTwo = listMarkersToPlot[iMarker][1]
 
+			# apply the KDE coloring function
             arrayXToPlot, arrayYToPlot, arrayForColor = PreProc.density_scatters(
                 arrayXIn=dfTCGAMets[strMarkerOne].values.astype(np.float),
                 arrayYIn=dfTCGAMets[strMarkerTwo].values.astype(np.float))
 
             handAx = plt.subplot(arrayGridSpec[listOfPlotPosTuples[iMarker][0], listOfPlotPosTuples[iMarker][1]])
+			# plot the scatter plot with markers colored according to sample density
             handAx.scatter(arrayXToPlot, arrayYToPlot,
                            c=arrayForColor, s=10, edgecolor='', cmap=plt.cm.viridis)
 
+			# calculate the Pearson's and Spearman's correlations
             structPearsCorr = scipy.stats.pearsonr(arrayXToPlot, arrayYToPlot)
             structSpearCorr = scipy.stats.spearmanr(arrayXToPlot, arrayYToPlot)
 
+			# determine the data ranges
             numXMin = np.min(arrayXToPlot)
             numXMax = np.max(arrayXToPlot)
             numXRange = np.ptp(arrayXToPlot)
@@ -2988,24 +3003,28 @@ class Plot:
             numYMax = np.max(arrayYToPlot)
             numYRange = np.ptp(arrayYToPlot)
 
+			# specify square/equal axes
             handAx.set_xlim([numXMin-0.05*numXRange, numXMax+0.05*numXRange])
             handAx.set_ylim([numYMin-0.05*numYRange, numYMax+0.05*numYRange])
 
-            structAxPos = handAx.get_position()
-
+			# resize the tick labels
             for handTick in handAx.xaxis.get_major_ticks():
                 handTick.label.set_fontsize(Plot.numFontSize*0.7)
 
             for handTick in handAx.yaxis.get_major_ticks():
                 handTick.label.set_fontsize(Plot.numFontSize*0.7)
 
+			# specify the axis labels
             handAx.set_xlabel(strMarkerOne, fontsize=Plot.numFontSize*0.7)
             handAx.set_ylabel(strMarkerTwo, fontsize=Plot.numFontSize*0.7)
 
+			# put the Pearson's & Spearman's correlations into the plot title
             handAx.set_title('$r_{P}$ = ' + '{:03.2f}'.format(structPearsCorr[0]) +
                              '; $r_{S}$ = ' + '{:03.2f}'.format(structSpearCorr.correlation),
                              fontsize=Plot.numFontSize*0.5)
 
+			# label the subplot
+            structAxPos = handAx.get_position()
             handFig.text(structAxPos.x0 - 0.25*structAxPos.width,
                          structAxPos.y0 + 1.01*structAxPos.height,
                          listMarkerPairSubPlotLabels[iMarker],
@@ -3013,6 +3032,7 @@ class Plot:
                          fontsize=Plot.numFontSize*0.8,
                          weight='bold')
 
+		# create a GridSpec for the survival/Kaplan-Meier curves
         arrayGridSpec = matplotlib.gridspec.GridSpec(nrows=1, ncols=2,
                                             left=0.13, right=0.96,
                                             bottom=0.17, top=0.38,
@@ -3020,6 +3040,7 @@ class Plot:
 
         handAx = plt.subplot(arrayGridSpec[0,0])
         structAxPos = handAx.get_position()
+		# split by TGF-B EMT and NK score
         dictKMFs = Analyse.split_two_markers_four_partitions(strMarkerOneToSplit='NK Score',
                                                              strMarkerTwoToSplit='TGF-B EMT Score',
                                                              dfForAnalysis=dfTCGAMets.loc[listPatientsBelowAgeThresh])
@@ -3029,13 +3050,16 @@ class Plot:
         kmfHiLo = dictKMFs['kmfHiLo']
         kmfHiHi = dictKMFs['kmfHiHi']
 
+		# plot the Kaplan-Meier curve for each subset
         for kmf in [kmfLoLo, kmfLoHi, kmfHiLo, kmfHiHi]:
             kmf.plot(ax=handAx)
 
+		# relabel the x and y axes
         handAx.set_ylim([0, 1])
         arrayXLim = handAx.get_xlim()
         handAx.set_xlim([0, arrayXLim[1]])
 
+		# specify x ticks as years
         arrayXTicksInMo = np.arange(start=0, stop=arrayXLim[1], step=60)
         arrayXTicksInYr = np.arange(start=0, stop=((arrayXTicksInMo[-1])/12)+1, step=5, dtype=np.int)
 
@@ -3049,9 +3073,11 @@ class Plot:
         handAx.yaxis.set_ticks_position('left')
         handAx.xaxis.set_ticks_position('bottom')
 
+		# label the subplot with the patient age group
         handAx.set_title('Patients < ' + '{:02.1f}'.format(numAgeThresh/(30.5*12.0)) + ' y.o.',
                          fontsize=Plot.numFontSize*0.7)
 
+		# label the axes
         handAx.set_xlabel('Time (years)', fontsize=Plot.numFontSize*0.7)
         handAx.set_xticklabels(arrayXTicksInYr)
         for handTick in handAx.xaxis.get_major_ticks():
@@ -3061,6 +3087,7 @@ class Plot:
         for handTick in handAx.yaxis.get_major_ticks():
             handTick.label.set_fontsize(Plot.numFontSize*0.7)
 
+		# add a legend for the KM curves
         plt.legend(loc='upper center',
                    bbox_to_anchor=(0.5, -0.31),
                    fontsize=Plot.numFontSize*0.5,
@@ -3068,6 +3095,7 @@ class Plot:
                    framealpha=1,
                    ncol=1)
 
+		# annotate KM curves that are significantly different
         arrayStartXForSig = [0.155, 0.65]
         numXSpacerForSigAnnot = 0.01
         numYSpacerForSigAnnot = 0.025
@@ -3076,9 +3104,11 @@ class Plot:
         numSigAnnotStartX = arrayStartXForSig[0]
 
         iPlottedSig = 0
-
-        if dictKMFs['LoLoVsLoHi'].p_value < 5E-2:
-            if dictKMFs['LoLoVsLoHi'].p_value < 1E-6:
+		numOneStarPValThresh = 5E-2
+		numTwoStarPValThresh = 1E-6
+		
+        if dictKMFs['LoLoVsLoHi'].p_value < numOneStarPValThresh:
+            if dictKMFs['LoLoVsLoHi'].p_value < numTwoStarPValThresh:
                 strToPlot = '***'
             elif dictKMFs['LoLoVsLoHi'].p_value < 1E-3:
                 strToPlot = '**'
@@ -3106,8 +3136,8 @@ class Plot:
 
             iPlottedSig = iPlottedSig + 1
 
-        if dictKMFs['LoLoVsHiLo'].p_value < 5E-2:
-            if dictKMFs['LoLoVsHiLo'].p_value < 1E-6:
+        if dictKMFs['LoLoVsHiLo'].p_value < numOneStarPValThresh:
+            if dictKMFs['LoLoVsHiLo'].p_value < numTwoStarPValThresh:
                 strToPlot = '***'
             elif dictKMFs['LoLoVsHiLo'].p_value < 1E-3:
                 strToPlot = '**'
@@ -3135,8 +3165,8 @@ class Plot:
 
             iPlottedSig = iPlottedSig + 1
 
-        if dictKMFs['LoLoVsHiHi'].p_value < 5E-2:
-            if dictKMFs['LoLoVsHiHi'].p_value < 1E-6:
+        if dictKMFs['LoLoVsHiHi'].p_value < numOneStarPValThresh:
+            if dictKMFs['LoLoVsHiHi'].p_value < numTwoStarPValThresh:
                 strToPlot = '***'
             elif dictKMFs['LoLoVsHiHi'].p_value < 1E-3:
                 strToPlot = '**'
@@ -3164,8 +3194,8 @@ class Plot:
 
             iPlottedSig = iPlottedSig + 1
 
-        if dictKMFs['LoHiVsHiLo'].p_value < 5E-2:
-            if dictKMFs['LoHiVsHiLo'].p_value < 1E-6:
+        if dictKMFs['LoHiVsHiLo'].p_value < numOneStarPValThresh:
+            if dictKMFs['LoHiVsHiLo'].p_value < numTwoStarPValThresh:
                 strToPlot = '***'
             elif dictKMFs['LoHiVsHiLo'].p_value < 1E-3:
                 strToPlot = '**'
@@ -3193,8 +3223,8 @@ class Plot:
 
             iPlottedSig = iPlottedSig + 1
 
-        if dictKMFs['LoHiVsHiHi'].p_value < 5E-2:
-            if dictKMFs['LoHiVsHiHi'].p_value < 1E-6:
+        if dictKMFs['LoHiVsHiHi'].p_value < numOneStarPValThresh:
+            if dictKMFs['LoHiVsHiHi'].p_value < numTwoStarPValThresh:
                 strToPlot = '***'
             elif dictKMFs['LoHiVsHiHi'].p_value < 1E-3:
                 strToPlot = '**'
@@ -3222,8 +3252,8 @@ class Plot:
 
             iPlottedSig = iPlottedSig + 1
 
-        if dictKMFs['HiLoVsHiHi'].p_value < 5E-2:
-            if dictKMFs['HiLoVsHiHi'].p_value < 1E-6:
+        if dictKMFs['HiLoVsHiHi'].p_value < numOneStarPValThresh:
+            if dictKMFs['HiLoVsHiHi'].p_value < numTwoStarPValThresh:
                 strToPlot = '***'
             elif dictKMFs['HiLoVsHiHi'].p_value < 1E-3:
                 strToPlot = '**'
