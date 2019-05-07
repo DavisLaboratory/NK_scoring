@@ -23,13 +23,15 @@ Code in this repository includes contributions from:
    - reports :: Rmarkdown reports
       - MANIFEST.txt :: The NIH/NCI Genomic Data Commons manifest file for TCGA SKCM samples used in this analysis (this is automatically downloaded when using TCGAbiolinks package to download the data) 
 	  - Human_genes__GRCh38_p12_.rda :: RData for human gene annotation (this is automatically downloaded when using TCGAbiolinks package to download the data)
-	  - NK_scoring_survival.html/.Rmd :: Reports showing an alternative implementation of the NK scoring survival analysis. **NB:** some of the parameters used for thresholding scores as well as the format of the TCGA data vary slightly in this analysis and it is not an exact reproduction of the python script used for the associated manuscript, although sample scores etc are consistent
-	  - NK_singleCell_SadeFeldman.html/.Rmd :: the single cell RNA-seq analysis of melanoma data from Sade-Feldman et al. (2018). *Cell*. - included as Figure 3 within the manuscript
+	  - NK_scoring_survival.html/.Rmd :: Reports showing an alternative implementation of the NK scoring survival analysis. 
+	    **NB:** some of the parameters used for thresholding scores as well as the format of the TCGA data vary slightly in this analysis and it is not an exact reproduction of the python script used for the associated manuscript, although sample scores etc are consistent
+	  - NK_singleCell_SadeFeldman.html/.Rmd :: the single cell RNA-seq analysis of melanoma data from Sade-Feldman et al. (2018). *Cell*. - included as part of Fig. 3 within the manuscript
 	  - NK_singleCell_Tirosh.html/.Rmd :: the single cell RNA-seq analysis of melanoma data from Tirosh et al. (2015). *Science* - included as part of Fig. 2 & Fig. 3 within the manuscript
    - script :: R scripts
       - boxplot_vertical_ggplot.R :: A custom fuction used to generate boxplot of Tirosh data included as Fig. 3A in NK_singleCell_Tirosh.html/.Rmd report
 	  - DE_NK_Genes_BloodBulk.R :: differential expression analysis to identify genes expressed at higher levels in NK cells relative to other blood populations (using data from Linsley et al noted above).
-	  - Survival_analysis.R :: A custom function for R-based reimplementation of survival analysis for genes investigated in the NK_scoring_survival.html/.Rmd report - **NB:** this is not the version used in the manuscript, it is an alternative implementation showing consistent results
+	  - Survival_analysis.R :: A custom function for R-based reimplementation of survival analysis for genes investigated in the NK_scoring_survival.html/.Rmd report
+	    **NB:** this is not the version used in the manuscript, it is an alternative implementation showing consistent results
    
    
 ## Data
@@ -40,7 +42,10 @@ The authors would like to acknowledge the authors of previous works who have mad
    - Please refer to the original TCGA SKCM manuscript for further details: Genomic Classification of Cutaneous Melanoma. *Cell* (2015). 161(7): pp. 1681-1696. DOI: 10.1016/j.cell.2015.05.044
    - Data can be downloaded directly from the NIH/NCI genomic data commons (GDC): https://portal.gdc.cancer.gov/projects/TCGA-SKCM
    
-* The LM-MEL cell line panel
+* The LM-MEL cell line panel:
+
+   - Behren A, *et al* (2013). The Ludwig Institute for Cancer Research Melbourne Melanoma Cell Line Panel. *Pigment Cell & Melanoma Research*. 26: 597-600. DOI: 10.1111/pcmr.12097
+   - Data were downloaded directly from ArrayExpress with the accession number: E-MTAB-1496
 
 * Tirosh *et al*. single cell RNA-seq data from dissociated melanoma samples
 
