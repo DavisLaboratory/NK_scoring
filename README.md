@@ -24,14 +24,14 @@ Code in this repository includes contributions from:
       - MANIFEST.txt :: The NIH/NCI Genomic Data Commons manifest file for TCGA SKCM samples used in this analysis (this is automatically downloaded when using TCGAbiolinks package to download the data) 
 	  - Human_genes__GRCh38_p12_.rda :: RData for human gene annotation (this is automatically downloaded when using TCGAbiolinks package to download the data)
 	  - NK_scoring_survival.html/.Rmd :: Reports showing an alternative implementation of the NK scoring survival analysis. 
-	    **NB:** some of the parameters used for thresholding scores as well as the format of the TCGA data vary slightly in this analysis and it is not an exact reproduction of the python script used for the associated manuscript, although sample scores etc are consistent
+	    - **NB:** some of the parameters used for thresholding scores as well as the format of the TCGA data vary slightly in this analysis and it is not an exact reproduction of the python script used for the associated manuscript, although sample scores etc are consistent
 	  - NK_singleCell_SadeFeldman.html/.Rmd :: the single cell RNA-seq analysis of melanoma data from Sade-Feldman et al. (2018). *Cell*. - included as part of Fig. 3 within the manuscript
 	  - NK_singleCell_Tirosh.html/.Rmd :: the single cell RNA-seq analysis of melanoma data from Tirosh et al. (2015). *Science* - included as part of Fig. 2 & Fig. 3 within the manuscript
    - script :: R scripts
       - boxplot_vertical_ggplot.R :: A custom fuction used to generate boxplot of Tirosh data included as Fig. 3A in NK_singleCell_Tirosh.html/.Rmd report
 	  - DE_NK_Genes_BloodBulk.R :: differential expression analysis to identify genes expressed at higher levels in NK cells relative to other blood populations (using data from Linsley et al noted above).
 	  - Survival_analysis.R :: A custom function for R-based reimplementation of survival analysis for genes investigated in the NK_scoring_survival.html/.Rmd report
-	    **NB:** this is not the version used in the manuscript, it is an alternative implementation showing consistent results
+	    - **NB:** this is not the version used in the manuscript, it is an alternative implementation showing consistent results
    
    
 ## Data
@@ -56,7 +56,7 @@ The authors would like to acknowledge the authors of previous works who have mad
 
    - Sade-Feldman M, *et al*. (2018). Defining T Cell States Associated with Response to Checkpoint Immunotherapy in Melanoma. *Cell*. 175(4): 998-1013.e20. DOI: 10.1016/j.cell.2018.10.038
    - Data were downloaded directly from the NCBI gene expression omnibus with accession number: GSE120575
-   - **NB**: only pre-treatment samples were used for this analysis
+     - **NB**: only pre-treatment samples were used for this analysis
 
 * Linsley *et al*. RNA-seq data from sorted immune cell populations: 
 
