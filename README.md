@@ -1,6 +1,6 @@
 # Predicting natural killer cell infiltration in metastatic melanoma
 This repository contains code for the manuscript:
-* Cursons *et al*. (*in press*). *Cancer Immunology Research*. A gene signature predicting natural killer cell infiltration and improved survival in metastatic melanoma patients. DOI: not-yet-known.
+* Cursons *et al*. (*in press*). *Cancer Immunology Research*. A gene signature predicting natural killer cell infiltration and improved survival in metastatic melanoma patients. **DOI**: not-yet-known.
 
 For further information please contact:
 * Dr Joe Cursons: cursons.j (at) wehi.edu.au
@@ -39,33 +39,33 @@ The authors would like to acknowledge the authors of previous works who have mad
 * The Cancer Genome Atlas skin cutaneous melanoma (TCGA-SKCM) data
 
    - The TCGA SKCM data represent a large cohort of matched RNA-seq, patient outcome, as well as genomic sequencing data. RNA-seq and patient outcome data were used here.
-   - Please refer to the original TCGA SKCM manuscript for further details: Genomic Classification of Cutaneous Melanoma. *Cell* (2015). 161(7): pp. 1681-1696. DOI: 10.1016/j.cell.2015.05.044
+   - Please refer to the original TCGA SKCM manuscript for further details: Genomic Classification of Cutaneous Melanoma. *Cell* (2015). 161(7): pp. 1681-1696. **DOI**: 10.1016/j.cell.2015.05.044
    - Data can be downloaded directly from the NIH/NCI genomic data commons (GDC): https://portal.gdc.cancer.gov/projects/TCGA-SKCM
    
 * The LM-MEL cell line panel:
 
-   - Behren A, *et al* (2013). The Ludwig Institute for Cancer Research Melbourne Melanoma Cell Line Panel. *Pigment Cell & Melanoma Research*. 26: 597-600. DOI: 10.1111/pcmr.12097
+   - Behren A, *et al* (2013). The Ludwig Institute for Cancer Research Melbourne Melanoma Cell Line Panel. *Pigment Cell & Melanoma Research*. 26: 597-600. **DOI**: 10.1111/pcmr.12097
    - Data were downloaded directly from ArrayExpress with the accession number: E-MTAB-1496
 
 * Tirosh *et al*. single cell RNA-seq data from dissociated melanoma samples
 
-   - Tirosh I, *et al*. (2016). Dissecting the multicellular ecosystem of metastatic melanoma by single-cell RNA-seq. *Science*. 352(6282): 189-96. DOI: 10.1126/science.aad0501 
+   - Tirosh I, *et al*. (2016). Dissecting the multicellular ecosystem of metastatic melanoma by single-cell RNA-seq. *Science*. 352(6282): 189-96. **DOI**: 10.1126/science.aad0501 
    - Data were downloaded directly from the NCBI gene expression omnibus with accession number: GSE72056
 
 * Sade-Feldman *et al*. single cell RNA-seq data from dissociated melanoma samples 
 
-   - Sade-Feldman M, *et al*. (2018). Defining T Cell States Associated with Response to Checkpoint Immunotherapy in Melanoma. *Cell*. 175(4): 998-1013.e20. DOI: 10.1016/j.cell.2018.10.038
+   - Sade-Feldman M, *et al*. (2018). Defining T Cell States Associated with Response to Checkpoint Immunotherapy in Melanoma. *Cell*. 175(4): 998-1013.e20. **DOI**: 10.1016/j.cell.2018.10.038
    - Data were downloaded directly from the NCBI gene expression omnibus with accession number: GSE120575
      - **NB**: only pre-treatment samples were used for this analysis
 
 * Linsley *et al*. RNA-seq data from sorted immune cell populations: 
 
-   - Linsley PS, *et al*. (2014). Copy number loss of the interferon gene cluster in melanomas is linked to reduced T cell infiltrate and poor patient prognosis. *PLoS One*. 9(10):e109760. DOI: 10.1371/journal.pone.0109760
+   - Linsley PS, *et al*. (2014). Copy number loss of the interferon gene cluster in melanomas is linked to reduced T cell infiltrate and poor patient prognosis. *PLoS One*. 9(10):e109760. **DOI**: 10.1371/journal.pone.0109760
    - Data were downloaded directly from the NCBI gene expression omnibus with accession number: GSE60424
    
 * Novershtern *et al*. microarray data from sorted immune cell population:
 
-   - Novershtern N, *et al*. (2011). Densely interconnected transcriptional circuits control cell states in human hematopoiesis. *Cell*. 144(2): 296-309. DOI: 10.1016/j.cell.2011.01.004
+   - Novershtern N, *et al*. (2011). Densely interconnected transcriptional circuits control cell states in human hematopoiesis. *Cell*. 144(2): 296-309. **DOI**: 10.1016/j.cell.2011.01.004
    - Data were downloaded directly from the NCBI gene expression omnibus with accession number: GSE24759
 
 ## Python analysis script
