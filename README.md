@@ -4,7 +4,7 @@ This repository contains code for the manuscript:
 
 For further information please contact:
 * Dr Joe Cursons: cursons.j (at) wehi.edu.au
-* Dr Sepideh Foroutan: momeneh.foroutan (at) unimelb.edu.au
+* Dr Momeneh (Sepideh) Foroutan: momeneh.foroutan (at) unimelb.edu.au
 * Prof. Nicholas D Huntington: nicholas.huntington (at) monash.edu.au
 * Dr Melissa J Davis: davis.m (at) wehi.edu.au
 
@@ -16,20 +16,20 @@ Code in this repository includes contributions from:
 * Momeneh (Sepideh) Foroutan (momeneh.foroutan (at) unimelb.edu.au) 
    - data :: a folder containing extra data used in this analysis
       - bldCells_DGEList.RData :: gene expression/abundance data from blood cells used for the differential expression analysis as part of NK signature curation (original data are from Linsley et al. (2014). *PLoS One*.; differential expression analysis script is noted below)
-	  - Cursons_Guimaraes_NKsignature_CIR_2019.csv :: genes from the NK signature created for this report
+	  - Cursons_Guimaraes_NKsignature_CIR_2019.csv :: genes from the NK signature created for this report using Supplementary Table S1 in the paper.
 	  - Foroutan2016_TGFb_EMT_signature_upDown.txt :: genes for the TGF-B EMT signature from Foroutan et al. (2016). *Mol. Canc. Res.*
 	  - Homo_sapiens.gene_info :: gene mapping information used
 	  - Thiery_EMTsignature_both_tumour_cellLine_EntrezIDs.txt :: Epithelial and mesenchymal gene sets from Tan et al. [JP Thierry] (2014). *EMBO Mol. Med.*
    - reports :: Rmarkdown reports
-      - MANIFEST.txt :: The NIH/NCI Genomic Data Commons manifest file for TCGA SKCM samples used in this analysis 
-	  - Human_genes__GRCh38_p12_.rda :: RData for human gene annotation
-	  - NK_scoring_survival.html/.Rmd :: Reports showing an alternative implementation of the NK scoring survival analysis. **NB:** some of the parameters used for thresholding scores etc vary slightly in this analysis and it is not an exact reproduction of the python script used for the associated manuscript, although sample scores etc are consistent
+      - MANIFEST.txt :: The NIH/NCI Genomic Data Commons manifest file for TCGA SKCM samples used in this analysis (this is automatically downloaded when using TCGAbiolinks package to download the data) 
+	  - Human_genes__GRCh38_p12_.rda :: RData for human gene annotation (this is automatically downloaded when using TCGAbiolinks package to download the data)
+	  - NK_scoring_survival.html/.Rmd :: Reports showing an alternative implementation of the NK scoring survival analysis. **NB:** some of the parameters used for thresholding scores as well as the format of the TCGA data vary slightly in this analysis and it is not an exact reproduction of the python script used for the associated manuscript, although sample scores etc are consistent
 	  - NK_singleCell_SadeFeldman.html/.Rmd :: the single cell RNA-seq analysis of melanoma data from Sade-Feldman et al. (2018). *Cell*. - included as Figure 3 within the manuscript
 	  - NK_singleCell_Tirosh.html/.Rmd :: the single cell RNA-seq analysis of melanoma data from Tirosh et al. (2015). *Science* - included as part of Fig. 2 & Fig. 3 within the manuscript
    - script :: R scripts
-      - boxplot_vertical_ggplot.R :: boxplot of Tirosh data included as Fig. 3A
+      - boxplot_vertical_ggplot.R :: A custom fuction used to generate boxplot of Tirosh data included as Fig. 3A in NK_singleCell_Tirosh.html/.Rmd report
 	  - DE_NK_Genes_BloodBulk.R :: differential expression analysis to identify genes expressed at higher levels in NK cells relative to other blood populations (using data from Linsley et al noted above).
-	  - Survival_analysis.R :: R-based reimplementation of survival analysis for genes investigated in the report - **NB:** this is not the version used in the manuscript, it is an alternative implementation showing consistent results
+	  - Survival_analysis.R :: A custom function for R-based reimplementation of survival analysis for genes investigated in the NK_scoring_survival.html/.Rmd report - **NB:** this is not the version used in the manuscript, it is an alternative implementation showing consistent results
    
    
 ## Data
