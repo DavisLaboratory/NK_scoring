@@ -56,11 +56,11 @@ from lifelines.statistics import logrank_test as KMlogRankTest
 # This script has dependencies for a number of python libraries. Unfortunately due to space/reference limitations we
 #   were unable to include the full set of citations within our manuscript, but we would like to acknowledge the
 #   developers who work on these open source tools:
-#       matplotlib:
-#       scipy:
-#       numpy:
-#       lifelines:
-#       pandas:
+#       matplotlib: https://matplotlib.org/
+#       scipy: https://www.scipy.org/
+#       numpy: https://www.numpy.org/
+#       lifelines: https://lifelines.readthedocs.io/en/latest/
+#       pandas: https://pandas.pydata.org/
 #
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
 # This script has been split into three classes with corresponding functions:
@@ -84,11 +84,9 @@ from lifelines.statistics import logrank_test as KMlogRankTest
 #   Plot:
 #       * fig_one_and_supp_table_one()
 #       * fig_two()
-#		* NB: figure 3 (UMAP plots of single cell RNA-seq data) were generated using associated R scripts
 #       * fig_four()
 #       * fig_five()
 #		* supp_fig_one()
-#		* NB: Supplementary Figure S2 (workflow figure) was created using a graphical editor
 #		* supp_fig_three()
 #		* supp_fig_four()
 #		* supp_fig_five()
@@ -96,13 +94,15 @@ from lifelines.statistics import logrank_test as KMlogRankTest
 #		* supp_fig_seven()
 #		* supp_fig_eight()
 #		* supp_fig_nine()
+#		* NB: figure 3 (UMAP plots of single cell RNA-seq data) were generated using associated R scripts
+#		* NB: Supplementary Figure S2 (workflow figure) was created using a graphical editor
 #
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
 #                                           DATA PRE-PROCESSING FUNCTIONS
 class PreProc:
 
-    strDataBaseLoc='D:\\db\\tcga\\skcm'
-    strExtraAnalysisPath = 'D:\\OneDrive - wehi.edu.au\\papers\\2019_Cursons_NK_cells_in_melanoma\\data'
+    strDataBaseLoc=os.getcwd() 
+    strExtraAnalysisPath = os.getcwd() 
 
     listClinDataOfInt = ['gender',
                          'age_at_diagnosis',
@@ -151,7 +151,8 @@ class PreProc:
 
 
     def split_tcga_met_vs_pri(flagResult=False):
-        # This function processes the NIH/NCI genomic data commons (GDC) sample sheet for the TCGA SKCM cohort, together
+        """Process the GDC sample sheet & clinical metadata file to label samples and split primary/metastatic tumours"""
+		# This function processes the NIH/NCI genomic data commons (GDC) sample sheet for the TCGA SKCM cohort, together
         #   with the clinical metadata file to identify samples split by the presence of primary/metastatic tumour
         #   samples and the availability of data on patient age.
         #
@@ -210,7 +211,7 @@ class PreProc:
     def tcga_skcm_rna_data(flagResult=False,
                            strMessRNADataFolder='mRNAseq_preproc',
                            strMessRNADataFilename='SKCM.uncv2.mRNAseq_RSEM_all.txt'):
-
+		"""Process the TCGA SKCM RSEM normalised RNA-seq data into a dataframe"""
 		
         pathMessRNAData = os.path.join(PreProc.strDataBaseLoc, strMessRNADataFolder)
         dfRSEMData = pd.read_table(
@@ -241,6 +242,7 @@ class PreProc:
                        flagPerformExtraction=False,
                        strMergedFileName='merged_tcga_skcm.pickle',
                        listClinDataToMerge=listClinDataOfInt):
+		"""Combine the various TCGA SKCM data sets and perform gene set scoring"""
 		
 		# specify gene lists used for analysis
         listBottcherNKGenes = ['NCR3', 'KLRB1', 'PRF1', 'CD160', 'NCR1']
@@ -490,8 +492,10 @@ class PreProc:
                 'listClin':listClinDataOut}
 
     def tcga_skcm_classifications(flagResult=False,
-                                  strGeneListFolder='C:\\db\\geneLists'):
-
+                                  strGeneListFolder=os.getcwd()):
+		"""Load supplementary data tables from the original TCGA SKCM manuscript including the immune gene signature and
+		classifications of immune high/immune low samples"""
+								  
         strTCGAGeneListFileName = 'TCGA_SKCM_SuppTable4.xlsx'
         strTCGASampleClassificationFileName = 'TCGA_SKCM_SuppTable1.xlsx'
 
@@ -536,9 +540,6 @@ class PreProc:
         arrayNaNClusterLabel = dfTCGAGeneLists['RNA Cluster'].isnull()
         # and extracting the indices which are not NaN
         arrayNotNaNClusterLabelIndices = np.where(dfTCGAGeneLists['RNA Cluster'].notnull())[0]
-        # then using this to build a list of non-NaN labels
-        # listNotNaNClusterLabels = [listClusterLabels[i]
-        #                            for i in arrayNotNaNClusterLabelIndices]
         # step through each row with a NaN cluster label
         for iRow in np.where(arrayNaNClusterLabel)[0]:
             # find the lowest non-NaN row (maximum index) which is above this
@@ -650,6 +651,7 @@ class PreProc:
 
     def tcga_skcm_met_sites(flagResult=False,
                             flagProduceOutputTable=False):
+		"""Load detailed metastatic tumour sites from the TCGA SKCM data"""
 
         # load the TCGA data as a merged pandas dataframe
         dictTCGASKCM = PreProc.tcga_skcm_data(flagPerformExtraction=False)
@@ -883,13 +885,13 @@ class PreProc:
         return dfLMMEL
 
     def gse60424_data(flagResult=False,
-                      strDataLoc='D:\\db\\geo\\GSE60424',
+                      strDataLoc=os.getcwd(),
                       strDataFile='bldCells_TPM.tsv',
                       strMetaDataFile='SraRunTable.txt'):
-		"""Process the Linsley et al data and return a dataframe for later indexing.
-			Linsley PS, et al. (2014). Copy number loss of the interferon gene cluster in melanomas is 
-			linked to reduced T cell infiltrate and poor patient prognosis. PLoS One. 9(10):e109760. 
-			DOI: 10.1371/journal.pone.0109760"""
+		"""Process the Linsley et al data and return a dataframe for later indexing."""
+		# Linsley PS, et al. (2014). Copy number loss of the interferon gene cluster in melanomas is 
+		#  linked to reduced T cell infiltrate and poor patient prognosis. PLoS One. 9(10):e109760. 
+		#  DOI: 10.1371/journal.pone.0109760
 		
 		# A TPM normalised version of the data from GSE60424 (Linsley et al) was prepared by M Foroutan (see corresponding R data)
 		# --> load the gene expression data
@@ -929,16 +931,16 @@ class PreProc:
 
 
     def gse24759_data(flagResult=False,
-                      strDataLoc='D:\\db\\geo\\GSE24759',
+                      strDataLoc=os.getcwd(),
                       strDataFile='GSE24759_series_matrix.txt',
                       strProbeMapFile='GPL4685-15513.txt',
                       flagPerformExtraction=False,
                       strProcDataFilename='GSE24759_proc.pickle',
                       strProcMetaDataFilename='GSE24759_metadata_proc.pickle'):
-		"""Process the Novershtern et al data and return a dataframe for later indexing.
-			Novershtern N, et al. (2011). Densely interconnected transcriptional circuits control cell states
-			in human hematopoiesis. Cell. 144(2): 296-309. 
-			DOI: 10.1016/j.cell.2011.01.004"""
+		"""Process the Novershtern et al data and return a dataframe for later indexing."""
+		# Novershtern N, et al. (2011). Densely interconnected transcriptional circuits control cell states
+		#  in human hematopoiesis. Cell. 144(2): 296-309. 
+		#  DOI: 10.1016/j.cell.2011.01.004
 
         if not np.bitwise_and(os.path.exists(os.path.join(strDataLoc, strProcDataFilename)),
                               os.path.exists(os.path.join(strDataLoc, strProcMetaDataFilename))):
@@ -1029,10 +1031,10 @@ class PreProc:
         return dfOut, dfMetaData
 
     def gse24759_subsets(flagResult=False):
-		"""Specify the samples & groups to be retained from the Novershtern et al data and return a dicinoary for later indexing.
-			Novershtern N, et al. (2011). Densely interconnected transcriptional circuits control cell states
-			in human hematopoiesis. Cell. 144(2): 296-309. 
-			DOI: 10.1016/j.cell.2011.01.004"""
+		"""Specify the samples & groups to be retained from the Novershtern et al data and return a dictionary."""
+		# Novershtern N, et al. (2011). Densely interconnected transcriptional circuits control cell states
+		#  in human hematopoiesis. Cell. 144(2): 296-309. 
+		#  DOI: 10.1016/j.cell.2011.01.004
 		
 		# create a list of all samples grouped by similar cell types
         listOfListsAllSamplesTypeGrouped = [['Pro B-cell', 'Early B-cell'],
@@ -1456,7 +1458,9 @@ class Analyse:
                                           dfForAnalysis=pd.DataFrame(),
                                           flagShowSplitValues=False,
                                           flagExcludeMarkerInLabel=False):
+		"""Split a group of patients across a single marker (gene, gene set score) & examine survival."""
 
+		# Note that this function is hard coded to split patients at the 33rd and 66th percentile to produce 3 groups of  equal size
         numThreshOne = np.percentile(dfForAnalysis[strMarkerToSplit].values.astype(np.float), 33)
         numThreshTwo = np.percentile(dfForAnalysis[strMarkerToSplit].values.astype(np.float), 66)
 
@@ -1520,10 +1524,13 @@ class Analyse:
     def split_two_markers_four_partitions(strMarkerOneToSplit='undefined',
                                           strMarkerTwoToSplit='undefined',
                                           dfForAnalysis=pd.DataFrame()):
+		"""Split a group of patients across two markers (gene, gene set score) & examine survival."""
 
+		# NB: this is hard coded to split the groups by the median value across both markers; this can produce groups of uneven size when markers are correlated. 
         numThreshVarOne = np.percentile(dfForAnalysis[strMarkerOneToSplit].values.astype(np.float), 50)
         numThreshVarTwo = np.percentile(dfForAnalysis[strMarkerTwoToSplit].values.astype(np.float), 50)
 
+		# identify patient groups which are high/low for the two markers
         listLoLo = dfForAnalysis[np.bitwise_and(dfForAnalysis[strMarkerOneToSplit].values.astype(np.float) <= numThreshVarOne,
                                              dfForAnalysis[strMarkerTwoToSplit].values.astype(np.float) <= numThreshVarTwo)].index.tolist()
         listLoHi = dfForAnalysis[np.bitwise_and(dfForAnalysis[strMarkerOneToSplit].values.astype(np.float) <= numThreshVarOne,
@@ -1533,6 +1540,7 @@ class Analyse:
         listHiHi = dfForAnalysis[np.bitwise_and(dfForAnalysis[strMarkerOneToSplit].values.astype(np.float) > numThreshVarOne,
                                              dfForAnalysis[strMarkerTwoToSplit].values.astype(np.float) > numThreshVarTwo)].index.tolist()
 
+		# create a Kaplan-Meier fitter object (from lifelines) for each group and then fit
         kmfLoLo = KaplanMeierFitter()
         kmfLoLo.fit(
             dfForAnalysis['surv_time'].reindex(listLoLo).values.astype(np.float),
@@ -1564,7 +1572,7 @@ class Analyse:
             label=strMarkerOneToSplit+'$^{Hi}$/' + strMarkerTwoToSplit +
                   '$^{Hi}$ ($n$=' + '{}'.format(len(listHiHi)) + ')')
 
-
+		# perform a Kaplan-Meier log-rank test between each of the groups
         structLoLoVsLoHiKMLogRank = KMlogRankTest(
             dfForAnalysis['surv_time'].ix[listLoLo],
             dfForAnalysis['surv_time'].ix[listLoHi],
@@ -1602,6 +1610,7 @@ class Analyse:
             event_observed_A=dfForAnalysis['death_event'].ix[listHiLo],
             event_observed_B=dfForAnalysis['death_event'].ix[listHiHi])
 
+		# return all of these results as a dictionary
         return {'kmfLoLo':kmfLoLo,
                 'kmfLoHi':kmfLoHi,
                 'kmfHiLo':kmfHiLo,
@@ -1618,7 +1627,7 @@ class Analyse:
 #                                                   PLOTTING FUNCTIONS
 class Plot:
 
-    strOutputFolder = 'D:\\OneDrive - wehi.edu.au\\papers\\2019_Cursons_NK_cells_in_melanoma'
+    strOutputFolder = os.getcwd() 
     numFontSize = 10
     listFileFormat=['png', 'pdf']
 
@@ -4127,7 +4136,7 @@ class Plot:
         return flagResult
 
     def supp_fig_four(flagResult=False,
-                      strDataLoc='D:\\pyscript\\nk_cells_in_melanoma_mets',
+                      strDataLoc=os.getcwd(),
                       strTempFile='CrossClusteredTranscripts.pickle'):
 
         listGenesForCrossCorrDisp = ['IFNG', 'CD274', 'KLRD1', 'NCR1', 'NCR3', 'PRF1', 'GZMA', 'GZMH',
