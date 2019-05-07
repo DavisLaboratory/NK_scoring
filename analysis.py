@@ -79,8 +79,23 @@ from lifelines.statistics import logrank_test as KMlogRankTest
 #       * density_scatters()
 #       * refine_NK_signature()
 #   Analyse:
-#
+#       * split_one_marker_three_partitions()
+#       * split_two_markers_four_partitions()
 #   Plot:
+#       * fig_one_and_supp_table_one()
+#       * fig_two()
+#		* NB: figure 3 (UMAP plots of single cell RNA-seq data) were generated using associated R scripts
+#       * fig_four()
+#       * fig_five()
+#		* supp_fig_one()
+#		* NB: Supplementary Figure S2 (workflow figure) was created using a graphical editor
+#		* supp_fig_three()
+#		* supp_fig_four()
+#		* supp_fig_five()
+#		* supp_fig_six()
+#		* supp_fig_seven()
+#		* supp_fig_eight()
+#		* supp_fig_nine()
 #
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
 #                                           DATA PRE-PROCESSING FUNCTIONS
@@ -1598,22 +1613,6 @@ class Analyse:
                 'LoHiVsHiHi':structLoHiVsHiHiKMLogRank,
                 'HiLoVsHiHi':structHiLoVsHiHiKMLogRank}
 
-    def survival_specified_groups(listOfListsGroups=[['undefined']],
-                                  listOfGroupLabels=['undefined'],
-                                  dfForAnalysis=pd.DataFrame()):
-
-        listOfKMFs = []
-        for iGroup in range(len(listOfListsGroups)):
-
-            kmf = KaplanMeierFitter()
-            kmf.fit(
-                dfForAnalysis['surv_time'].reindex(listOfListsGroups[iGroup]).values.astype(np.float),
-                event_observed=dfForAnalysis['death_event'].reindex(listOfListsGroups[iGroup]),
-                label=listOfGroupLabels[iGroup] +
-                      ' ($n$=' + '{}'.format(len(listOfListsGroups[iGroup])) + ')')
-            listOfKMFs.append(kmf)
-
-        return listOfKMFs
 
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
 #                                                   PLOTTING FUNCTIONS
@@ -1626,18 +1625,24 @@ class Plot:
     def fig_one_and_supp_table_one(flagResult=False,
                 strTempDataFile='per_gene_hazard_ratio.pickle',
                 flagCalculateHRs=False):
+		"""Produce figure one within the corresponding manuscript: identify genes with a significant and highly-negative
+			hazard coefficient and produce Kaplan-Meier survival plots for selected genes"""
 
+		# specify some parameters for spacing sub-figures
         numXSpacerForSigAnnot = 0.009
         numYSpacerForSigAnnot = 0.023
 
+		# specify an RNA abundance threshold to discard genes which have very low abundance/no signal for survival analysis
         numPercForGlobalThresh = 10
 
+		# specify co-variates for the survival plots
         listCoVarsToPlotSurvEffect = [['Age'], ['Age','IFNG'], ['Age','KLRD1'], ['Age','IL15'], ['Age','B2M']]
         listMarkerSubPlotLabels = ['(B)', '(C)', '(D)', '(E)', '(F)']
 
+		# specify an array of x-positions used for labelling significance of the survival curve differences
         arrayStartXForSig = np.array([0.815, 0.80, 0.785, 0.80, 0.80], dtype=np.float)
 
-        # GO:0002376 : immune system process
+        # for the figure all genes associated with "GO:0002376 (immune system process)" were bolded
         listGOForHazRatioDisp = ['GO:0002376']
 
         if not os.path.exists(strTempDataFile):
@@ -1649,15 +1654,17 @@ class Plot:
         listTCGAGenes = dictTCGASKCM['listGenes']
         numTranscripts = len(listTCGAGenes)
 
+		# Load the dictionary with patient groups
         dictPatGroups = PreProc.split_tcga_met_vs_pri()
 
+		# select the subset of metastatic tumours samples where patient age data are available
         listMetOnlyPatientsWithAge = dictPatGroups['MetOnlyPatWithAge']
         # append the '-06' suffix indicative of metastatic samples
         listMetOnlySamplesWithAge = [strPat + '-06' for strPat in listMetOnlyPatientsWithAge]
         numPatients = len(listMetOnlySamplesWithAge)
-
         dfTCGAMets = dfTCGA.loc[listMetOnlySamplesWithAge]
 
+		# determine a threshold for abundance
         arrayFlatAllAbundData = np.ravel(np.nan_to_num(dfTCGAMets[listTCGAGenes].values.astype(np.float)))
         numMinVal = np.min(arrayFlatAllAbundData)
         numGlobalThresh = np.percentile(arrayFlatAllAbundData[arrayFlatAllAbundData > numMinVal], numPercForGlobalThresh)
@@ -1671,35 +1678,45 @@ class Plot:
                                                      for strSex in dfTCGAMets['gender'].tolist()]),
                                            index=dfTCGAMets.index.tolist())
 
+		# Load a dataframe containing the metastatic tumour sites
         dfMetSites = PreProc.tcga_skcm_met_sites()
 
+		# Create a Cox proportional hazards model fitter instance (from lifelines)
         structAgeGenderSitePropHazard = CoxPHFitter()
+		
+		# Extract required data into a dataframe for the Cox PH model where age, gender & metastatic location are the only
+		#  covariates
         dfForCoxPH = dfTCGAMets[['Age', 'isFemale', 'death_event', 'surv_time']].join(dfMetSites)
-
+		# Fit the Cox PH model
         structAgeGenderSitePropHazard.fit(dfForCoxPH, duration_col='surv_time',
                                           event_col='death_event', step_size=0.1)
-
+										  
+		# extract the Cox PH model summary as a dataframe and output
         dfHazardSummary = structAgeGenderSitePropHazard.summary
-
         dfHazardSummary.to_csv(os.path.join(Plot.strOutputFolder,'AgeGenderSite_CoxPH.tsv'),
                                sep='\t', header=True)
 
         if flagCalculateHRs:
+			# step through every gene and produce a Cox PH model with patient age as the only other covariate
             dfPerGeneHazRatio = pd.DataFrame(index=listTCGAGenes,
                                              columns=['Coef', 'Lower CI', 'Upper CI', 'p-value'],
                                              data=np.zeros((numTranscripts, 4), dtype=np.float))
             for iTranscript in range(numTranscripts):
                 print('iTranscript ' + '{}'.format(iTranscript) + ' of ' + '{}'.format(numTranscripts))
+				# intialise a Cox proportional hazards model
                 structAgeGenePropHazard = CoxPHFitter()
 
+				# check that the gene passes transcript abundance thresholds
                 arrayGeneData = dfTCGAMets[listTCGAGenes[iTranscript]].values.astype(np.float)
                 numAbundRange = np.ptp(arrayGeneData)
                 numFractAboveGlobalPercThresh = np.float(np.sum(arrayGeneData > numGlobalThresh))/np.float(numPatients)
 
                 if np.bitwise_and(numAbundRange > 0.5, numFractAboveGlobalPercThresh > 0.20):
+					# extract the data subset for the Cox PH model and perform fitting
                     dfForCoxPH = dfTCGAMets[['Age','death_event','surv_time', listTCGAGenes[iTranscript]]]
                     structAgeGenePropHazard.fit(dfForCoxPH, duration_col='surv_time', event_col='death_event')
 
+					# extract the corresponding parameters for the survival analysis
                     dfPerGeneHazRatio['Coef'].iloc[iTranscript] = structAgeGenePropHazard.hazards_[listTCGAGenes[iTranscript]].loc['coef']
                     arrayConfInt = structAgeGenePropHazard.confidence_intervals_[listTCGAGenes[iTranscript]].loc[:].values.astype(np.float)
                     dfPerGeneHazRatio['Lower CI'].iloc[iTranscript] = arrayConfInt[0]
@@ -1715,40 +1732,45 @@ class Plot:
 
             dfPerGeneHazRatio = pd.read_pickle(strTempDataFile)
 
+		# identify the top 100 'protective' genes with a negative hazard ratio
         dfProtectiveGenes = dfPerGeneHazRatio[dfPerGeneHazRatio['Coef'] < 0].copy(deep=True)
-
         arrayTop100GeneRows = np.argsort(dfProtectiveGenes['p-value'])[0:100]
 
+		# extract these into a dataframe
         dfTopGenes = dfProtectiveGenes.iloc[arrayTop100GeneRows].copy(deep=True)
-
+		# determine gene ranking by the average hazard ratio coefficient
         arrayTopGenesRankedByCoef = np.argsort(dfTopGenes['Coef'].values.astype(np.float))
 
         numMinCoefDisp = -2.3
 
         listGenesForHazRatioDisp = []
         for strGOAnnot in listGOForHazRatioDisp:
+			# identify all genes present within the specified GO category (immune function) and children nodes/GO annotations
             listGenesInGO = GeneOntology.Map.genes_with_starting_category(strStartingCategory=strGOAnnot)
             for strGene in listGenesInGO:
                 if strGene not in listGenesForHazRatioDisp:
                     listGenesForHazRatioDisp.append(strGene)
 
-
+		# create the output figure
         handFig = plt.figure()
         handFig.set_size_inches(w=5,h=7)
 
         handAx1 = handFig.add_axes([0.12, 0.07, 0.17, 0.90])
         structAx1Pos = handAx1.get_position()
-
+		
+		# Plot the hazard ratio coefficients
         handAx1.plot(dfTopGenes['Coef'].iloc[arrayTopGenesRankedByCoef].values.astype(np.float),
                         np.arange(start=0.5, stop=100.5, step=1),
                         'o', color='r',
                     zorder=8, markersize=1.5)
+		# Plot the confidence intervals for the hazard ratio coefficients
         for iGene in range(len(arrayTopGenesRankedByCoef)):
             handAx1.plot([dfTopGenes['Lower CI'].iloc[arrayTopGenesRankedByCoef[iGene]].astype(np.float),
                          dfTopGenes['Upper CI'].iloc[arrayTopGenesRankedByCoef[iGene]].astype(np.float)],
                         [0.5+np.float(iGene), 0.5+np.float(iGene)],
                         '-', color='k', zorder=7, lw=1)
 
+		# specify a number of axis/tick parameters for tidying up the figure
         handAx1.set_xticks([-2, -1, 0])
         handAx1.set_yticks([])
         handAx1.set_ylim([0, 100])
@@ -1756,7 +1778,7 @@ class Plot:
         handAx1.axvline(x=0, ymin=0, ymax=1, lw=0.5, c='0.5')
         handAx1.set_title('Hazard coefficient', fontsize=Plot.numFontSize)
 
-
+		# step through each gene and if this is present withing the GO annotated list weight as bold
         for iGene in range(len(arrayTopGenesRankedByCoef)):
             strGene = dfTopGenes.index.tolist()[arrayTopGenesRankedByCoef[iGene]]
             if strGene in listGenesForHazRatioDisp:
@@ -1766,13 +1788,17 @@ class Plot:
                 handAx1.text(numMinCoefDisp-0.1, np.float(iGene)+0.5, strGene, fontsize=4.5, ha='right', va='center',
                              style='italic')
 
+		# draw in some vertical lines to improve readability
         for numY in np.arange(start=0, stop=99, step=4):
             handAx1.axhline(y=numY, xmin=0, xmax=1, lw=0.5, c='0.5', ALPHA=0.8, zorder=2)
 
+		# extract the p-values from the data
         arrayLogPValsToPlot = np.zeros((len(arrayTopGenesRankedByCoef),1), dtype=np.float)
-        arrayLogPVals = np.log10(dfTopGenes['p-value'].iloc[arrayTopGenesRankedByCoef[::-1]].values.astype(np.float)*np.shape(dfTopGenes)[0])
+		# multiply by the number of genes for the equivalent of a Bonferroni correction
+        arrayLogPVals = np.log10(dfTopGenes['p-value'].iloc[arrayTopGenesRankedByCoef[::-1]].values.astype(np.float)*np.shape(dfProtectiveGenes)[0])
         arrayLogPValsToPlot[:,0] = arrayLogPVals
 
+		# create the axis for the p-values and plot as a heatmap
         handAx2 = handFig.add_axes([0.31, 0.07, 0.03, 0.90])
         handPVals = handAx2.imshow(
             arrayLogPValsToPlot,
@@ -1784,6 +1810,7 @@ class Plot:
         handAx2.set_xticks([])
         handAx2.set_yticks([])
 
+		# create an axis for the p-value heatmap colormap
         handAx2CMap = handFig.add_axes([0.39, 0.65, 0.02, 0.12])
         structAxPos = handAx2CMap.get_position()
         handColorBarPVals = handFig.colorbar(handPVals,
@@ -1800,6 +1827,7 @@ class Plot:
                      rotation=90,
                      fontsize=0.7*Plot.numFontSize)
 
+		# label the sub-figure
         handFig.text(structAx1Pos.x0 - 0.48*structAx1Pos.width,
                      structAx1Pos.y0 + 1.02*structAx1Pos.height,
                      '(A)',
@@ -1807,15 +1835,17 @@ class Plot:
                      fontsize=Plot.numFontSize,
                      weight='bold')
 
+		# use gridspec to layout the survival plots
         arrayGridSpec = gridspec.GridSpec(nrows=len(listCoVarsToPlotSurvEffect), ncols=1,
                                           left=0.62, right=0.97,
                                           bottom=0.07, top=0.97,
                                           wspace=0.4, hspace=0.45)
 
+		# step through each specificed marker
         for iMarker in range(len(listCoVarsToPlotSurvEffect)):
 
             if len(listCoVarsToPlotSurvEffect[iMarker]) == 1:
-
+				# if only a single marker is used to split the samples split into 3 partitions (Low/Med/High)
                 strMarker = listCoVarsToPlotSurvEffect[iMarker][0]
 
                 dictKMFs = Analyse.split_one_marker_three_partitions(strMarkerToSplit=strMarker,
@@ -1826,13 +1856,13 @@ class Plot:
 
                 handAx = plt.subplot(arrayGridSpec[iMarker])
                 structAxPos = handAx.get_position()
-
+				
+				# plot the Kaplan-Meier function for each patient subset
                 for kmf in [kmfLow, kmfMed, kmfHigh]:
-
                     kmf.plot(ax=handAx)
 
             elif len(listCoVarsToPlotSurvEffect[iMarker]) == 2:
-
+				# if two markers are given  split the samples split into 4 partitions (LoLo, LoHi, HiLo, HiHi)
                 strMarkerOne = listCoVarsToPlotSurvEffect[iMarker][0]
                 strMarkerTwo = listCoVarsToPlotSurvEffect[iMarker][1]
 
@@ -1846,20 +1876,20 @@ class Plot:
 
                 handAx = plt.subplot(arrayGridSpec[iMarker])
                 structAxPos = handAx.get_position()
-
+				# plot the Kaplan-Meier function for each patient subset
                 for kmf in [kmfLoLo, kmfLoHi, kmfHiLo, kmfHiHi]:
                     kmf.plot(ax=handAx)
 
+			# tidy up the axis labeling, limits and tick marks
             handAx.set_ylim([0, 1])
             arrayXLim = handAx.get_xlim()
             handAx.set_xlim([0, arrayXLim[1]])
-
             arrayXTicksInMo = np.arange(start=0, stop=arrayXLim[1], step=60)
             arrayXTicksInYr = np.arange(start=0, stop=((arrayXTicksInMo[-1])/12)+1, step=5, dtype=np.int)
-
             handAx.set_xticks(arrayXTicksInMo)
             handAx.set_yticks([0, 0.5, 1.0])
 
+			# for the final plot label the x-axis
             if iMarker == 4:
                 handAx.set_xlabel('Time (years)', fontsize=Plot.numFontSize)
                 handAx.set_xticklabels(arrayXTicksInYr)
@@ -1869,10 +1899,12 @@ class Plot:
                 handAx.set_xlabel('')
                 handAx.set_xticklabels([])
 
+			# for all plots label the y-axis
             handAx.set_ylabel('Overall survival', fontsize=Plot.numFontSize)
             for handTick in handAx.yaxis.get_major_ticks():
                 handTick.label.set_fontsize(Plot.numFontSize)
-
+			
+			# output the legend labelling each of the LM curves
             plt.legend(loc='lower right',
                        bbox_to_anchor=(1.10, 0.62),
                        fontsize=Plot.numFontSize*0.5,
@@ -1884,12 +1916,12 @@ class Plot:
             # Annotate the survival curves with significance
             #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
             if len(listCoVarsToPlotSurvEffect[iMarker]) == 1:
-
+				# the Analyse.survival functions also return p-values for comparison
                 numSigAnnotStartY = structAxPos.y0 + 1.02*structAxPos.height
                 numSigAnnotStartX = arrayStartXForSig[iMarker]
 
                 iPlottedSig = 0
-
+				# step through each comparison (Low/Med/High) and draw in asterisks to label significance
                 if dictKMFs['LowVsMed'].p_value < 5E-2:
                     if dictKMFs['LowVsMed'].p_value < 1E-6:
                         strToPlot = '***'
@@ -5657,24 +5689,22 @@ class Plot:
 
 # Execute the associated functions as required
 # _ = PreProc.refine_NK_signature()
-
-_ = Plot.fig_one_and_supp_table_one()
+#
+#
+# _ = Plot.fig_one_and_supp_table_one()
 # _ = Plot.fig_two()
-
+#
 # _ = Plot.fig_four()
 # _ = Plot.fig_five()
 #
+#
 # _ = Plot.supp_fig_one()
-
+#
 # _ = Plot.supp_fig_three()
-#
 # _ = Plot.supp_fig_four()
-#
 # _ = Plot.supp_fig_five()
 # _ = Plot.supp_fig_six()
 # _ = Plot.supp_fig_seven()
 # _ = Plot.supp_fig_nine()
 
-# _ = Plot.supp_fig_more_survival()
-# _ = Plot.supp_fig_associations()
 
