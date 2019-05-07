@@ -82,10 +82,11 @@ The authors would like to convey their gratitude to the developers of python lib
 * [numpy](https://www.numpy.org/)
 * [pandas](https://pandas.pydata.org/)
 * [scipy](https://www.scipy.org/)
+
 A number of small package dependencies are required for mapping gene synonyms; these scripts are available from Joe Cursons (@jcursons) upon request (currently available from a private repository) and they will be made released here over the coming weeks as documentation is added.
 
 ### Script classes
-Please note that this script is not designed to be loaded as a python library, however, to make the workflow more interpretable certain procedures have been defined as functions, split into related classes. At the bottom of the script are functions that will allow you to reproduce figures from the manuscript.
+Please note that this script is not designed to be loaded as a python package, however, to make the workflow more interpretable certain procedures have been defined as functions, split into related classes. At the bottom of the script are functions that will allow you to reproduce figures from the manuscript, in particular the user will be required to download TableS1 from the manuscript.
 * PreProc: a series of functions which perform pre-processing on different data sets to make sample accession easier for corresponding subsets of samples etc
    - split_tcga_met_vs_pri()
       - Process the GDC sample sheet & clinical metadata file to label samples and split primary/metastatic tumours
@@ -117,6 +118,7 @@ Please note that this script is not designed to be loaded as a python library, h
       - Split a group of patients across two markers (gene, gene set score) & examine survival.
    
 * Plot:
+
 These functions will reproduce figures and tables from the manuscript.
    - fig_one_and_supp_table_one()
    - fig_two()
@@ -130,5 +132,5 @@ These functions will reproduce figures and tables from the manuscript.
    - supp_fig_seven()
    - supp_fig_eight()
    - supp_fig_nine()
-   - **NB**: Fig. 2A & Fig. 3 (UMAP plots of single cell RNA-seq data) were generated using associated R scripts
-   - **NB**: Supplementary Figure S2 (workflow figure) was created using a graphical editor
+**NB**: Fig. 2A & Fig. 3 (UMAP plots of single cell RNA-seq data) were generated using associated R scripts
+**NB**: Supplementary Figure S2 (workflow figure) was created using a graphical editor
