@@ -54,7 +54,7 @@ from lifelines.statistics import logrank_test as KMlogRankTest
 #   GSE24759
 #
 # This script has dependencies for a number of python libraries. Unfortunately due to space/reference limitations we
-#   were unable to include the full set of citations withn our manuscript, but we would like to acknowledge the
+#   were unable to include the full set of citations within our manuscript, but we would like to acknowledge the
 #   developers who work on these open source tools:
 #       matplotlib:
 #       scipy:
@@ -96,6 +96,7 @@ class PreProc:
                          'days_to_last_follow_up',
                          'site_of_resection_or_biopsy']
 
+	# As part of the supplementary material we investigated survival effects associated with metastatic tumour site; to facilitate a statistical analysis a number of different regions were grouped based on similar locations according to this dictionary:
     dictMetSiteGroupings = {
         'Brain, NOS': 'CNS',
         'Frontal lobe':'CNS',
@@ -135,9 +136,22 @@ class PreProc:
 
 
     def split_tcga_met_vs_pri(flagResult=False):
-
+        # This function processes the NIH/NCI genomic data commons (GDC) sample sheet for the TCGA SKCM cohort, together
+        #   with the clinical metadata file to identify samples split by the presence of primary/metastatic tumour
+        #   samples and the availability of data on patient age.
+        #
+        # As outlined within the corresponding manuscript there are unexpected survival differences between patients
+        #   with primary and metastatic tumours, and thus this analysis has focussed on the larger set of metastatic
+        #   samples. Furthermore to examine age-associated survival effects we have dropped samples where patient age
+        #   and/or survival data are unavailable.
+        #
+        # The TCGA SKCM sample sheet and clinical data can be downloaded directly from the genomic data commons website
+        #   (i.e. the gdc-client is not required):
+        #       https://portal.gdc.cancer.gov/projects/TCGA-SKCM
+        #
         #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
-        # Load and pre-process the required TCGA SKCM meta-data
+
+        # Load the required TCGA SKCM meta-data
         dfSampMap = pd.read_table(os.path.join(PreProc.strDataBaseLoc, 'gdc_sample_sheet.2018-03-26.tsv'), sep='\t',
                                   header=0, index_col=None)
         dfClinData = pd.read_table(
@@ -145,19 +159,22 @@ class PreProc:
                 sep='\t', header=0, index_col=None)
         dfClinData.set_index('submitter_id', inplace=True)
 
+        # identify samples with valid survival data; note that 'survival time' are split into two columns depending on
+        #   whether the patient was deceased (days_to_death) or alive (days_to_last_follow_up) at data release
         arrayDeathDataAreClean = np.bitwise_and((dfClinData['vital_status'] == 'dead').values.astype(np.bool),
                                                 ~(dfClinData['days_to_death'] == '--').values.astype(np.bool))
         arrayAliveDataAreClean = np.bitwise_and((dfClinData['vital_status'] == 'alive').values.astype(np.bool),
                                                 ~(dfClinData['days_to_last_follow_up'] == '--').values.astype(np.bool))
         arraySurvDataAreClean = np.bitwise_or(arrayDeathDataAreClean,arrayAliveDataAreClean)
 
+        # extract the index labels corresponding to these rows
         listSurvDataAreClean = [dfClinData.index.tolist()[i] for i in np.where(arraySurvDataAreClean)[0]]
 
-        #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
         # Identify target sample subsets with metastatic/primary tumours
         listPatsPriTum = dfSampMap['Case ID'][dfSampMap['Sample Type'] == 'Primary Tumor'].values.tolist()
         listPatsMetTum = dfSampMap['Case ID'][dfSampMap['Sample Type'] == 'Metastatic'].values.tolist()
 
+        # identify the corresponding patient subsets
         listPatsMetTumOnly = [strPatient
                               for strPatient in listPatsMetTum
                               if np.bitwise_and(strPatient not in listPatsPriTum,
@@ -166,11 +183,11 @@ class PreProc:
                               for strPatient in listPatsPriTum
                               if np.bitwise_and(strPatient not in listPatsMetTum,
                                                 strPatient in listSurvDataAreClean)]
-
         listPatsWithMetTumAndAge = [strPatient
                                     for strPatient in listPatsMetTumOnly
                                     if not dfClinData['age_at_diagnosis'].loc[strPatient] == '--']
 
+        # output as a dictionary
         return {'MetOnlyPat':listPatsMetTumOnly,
                 'PriOnlyPat':listPatsPriTumOnly,
                 'MetOnlyPatWithAge':listPatsWithMetTumAndAge}
@@ -179,6 +196,7 @@ class PreProc:
                            strMessRNADataFolder='mRNAseq_preproc',
                            strMessRNADataFilename='SKCM.uncv2.mRNAseq_RSEM_all.txt'):
 
+		
         pathMessRNAData = os.path.join(PreProc.strDataBaseLoc, strMessRNADataFolder)
         dfRSEMData = pd.read_table(
             os.path.join(pathMessRNAData, strMessRNADataFilename),
@@ -191,7 +209,7 @@ class PreProc:
         listGeneAndEntrez[numRowMisLabelled] = 'SLC35E2B|728661'
         dfRSEMData['HYBRIDIZATION R'] = pd.Series(listGeneAndEntrez, index=dfRSEMData.index.tolist())
 
-        # Drop all entries/rows where the HGNC identifier as unknown as I will match on HGNC symbol
+        # Drop all entries/rows where the HGNC identifier as unknown as I match on HGNC symbol
         arrayRowsWithCleanGenes = np.where([not strGene[0:2] == '?|' for strGene in listGeneAndEntrez])[0]
         dfOut = dfRSEMData.iloc[arrayRowsWithCleanGenes,:].copy(deep=True)
 
@@ -208,6 +226,8 @@ class PreProc:
                        flagPerformExtraction=False,
                        strMergedFileName='merged_tcga_skcm.pickle',
                        listClinDataToMerge=listClinDataOfInt):
+		
+		# specify gene lists used for analysis
         listBottcherNKGenes = ['NCR3', 'KLRB1', 'PRF1', 'CD160', 'NCR1']
         listBottchercDC1Genes = ['XCR1', 'CLEC9A', 'CLNK', 'BATF3']
 
@@ -216,17 +236,20 @@ class PreProc:
 
         if flagPerformExtraction:
 
+			# Load a processed dictionary with the original TCGA 'Immune' gene set and classifications for immune high/low
+            dictTCGAClassifications = PreProc.tcga_skcm_classifications()
+			
             #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
             # Load molecular (RNA-seq) data
-            dictTCGAClassifications = PreProc.tcga_skcm_classifications()
+			dfRSEMData = PreProc.tcga_skcm_rna_data()
 
-            dfRSEMData = PreProc.tcga_skcm_rna_data()
-
+			# Process the sample names as a list
             listColumns = dfRSEMData.columns.tolist()
             listSamples = [strCol for strCol in listColumns if strCol[0:4]=='TCGA']
             numTotSamples = len(listSamples)
+			
+			# Pull out the genes within these data and create a set for later comparisons
             listTCGAGenes = dfRSEMData.index.tolist()
-
             setTCGAGenes = set(listTCGAGenes)
 
 
@@ -242,17 +265,20 @@ class PreProc:
             dfClinDataOut['SampleID'] = listSamples
             dfClinDataOut.set_index('SampleID', inplace=True)
 
+			# identify samples which are dead (i.e. where a death event as happened)
             arrayPatientIsDead = np.array([strStatus == 'dead'
                                            for strStatus in dfClinDataOut['vital_status'].tolist()],
                                           dtype=np.bool)
 
-
+			# find entries for dead patients where days_to_death is specified, and entries for living patients where 
+			#  days_to_last_follow_up is specified
             arrayDeathDataAreClean = np.bitwise_and((dfClinDataOut['vital_status'] == 'dead').values.astype(np.bool),
                                                     ~(dfClinDataOut['days_to_death'] == '--').values.astype(np.bool))
             arrayAliveDataAreClean = np.bitwise_and((dfClinDataOut['vital_status'] == 'alive').values.astype(np.bool),
                                                     ~(dfClinDataOut['days_to_last_follow_up'] == '--').values.astype(np.bool))
 
 
+			# create a single vector of survival times which merges days to death/days to last follow up as required
             arraySurvivalTimes = np.nan*np.ones(len(arrayPatientIsDead), dtype=np.float)
             for iRow in range(len(arrayPatientIsDead)):
                 if arrayDeathDataAreClean[iRow]:
@@ -260,6 +286,7 @@ class PreProc:
                 elif arrayAliveDataAreClean[iRow]:
                     arraySurvivalTimes[iRow] = np.float(dfClinDataOut['days_to_last_follow_up'].iloc[iRow])
 
+			# output within the clinical data dataframe with survival time converted to months
             dfClinDataOut['death_event'] = arrayPatientIsDead
             dfClinDataOut.drop(labels=['vital_status', 'days_to_death', 'days_to_last_follow_up'],
                                axis=1,
@@ -280,34 +307,46 @@ class PreProc:
                                      columns=listSamples)
             dfRSEMOut = dfRSEMOut.transpose()
 
+			# Extract the T cell signature and identify genes overlapping with the TCGA data
             dictTCellSig = GeneSetScoring.CuratedList.t_cells_in_tumour()
             listTCellUpGenesInTCGA = list(set(dictTCellSig['T cells']['UpGenes']).intersection(setTCGAGenes))
 
+			# Extract the NK cell signature and identify genes overlapping with the TCGA data
             dfNKSigCuration = pd.read_table(os.path.join(Plot.strOutputFolder, 'NK_genes_curated.tsv'),
                                             sep='\t', header=0, index_col=0)
+			# Specifically select the genes which have passed our filtering criteria (Fig. S2 of the manuscript)
             listLocalNKSigGenes = dfNKSigCuration[dfNKSigCuration['CursonsGuimaraes_sigGene']==True].index.tolist()
-
             listNKUpGenesInTCGA = list(set(listLocalNKSigGenes).intersection(setTCGAGenes))
 
+			# Extract the Foroutan TGF-B EMT signature and identify genes overlapping with the TCGA data
             dictTGFBEMTScore = GeneSetScoring.ExtractList.foroutan2016_tgfb_mes_score()
             listTGFBEMTUp = list(set(dictTGFBEMTScore['Up']).intersection(setTCGAGenes))
             listTGFBEMTDn = list(set(dictTGFBEMTScore['Down']).intersection(setTCGAGenes))
 
+			# Extract the Tan Epithelial & Mesenchymal signatures and identify genes overlapping with the TCGA data
             dictTanEMTSigs = GeneSetScoring.ExtractList.tan2012_tumour_genes()
             listEpiGenes = list(set(dictTanEMTSigs['epi_genes']).intersection(setTCGAGenes))
             listMesGenes = list(set(dictTanEMTSigs['mes_genes']).intersection(setTCGAGenes))
 
+			
+			# For Fig. S9 we compare signatures across the TCGA and LM-MEL data sets; to facilitate this we must first
+			#  find the set of consistent genes
+			#  --> extract the LM-MEL data and create a set of genes
             dfLMMEL = PreProc.lm_mel_data()
             setLMMELGenes = set(dfLMMEL.columns.tolist())
 
             listTCGAImmuneGenes = dictTCGAClassifications['listGenesToScore']
 
+			# identify the intersection of the LM-MEL gene list with all other genes
             listTCGAGenesVsLMMEL = list(setTCGAGenes.intersection(setLMMELGenes))
             listEpiGenesVsLMMEL = list(set(listEpiGenes).intersection(setLMMELGenes))
             listMesGenesVsLMMEL = list(set(listMesGenes).intersection(setLMMELGenes))
             listTGFBEMTUpVsLMMEL = list(set(listTGFBEMTUp).intersection(setLMMELGenes))
             listTGFBEMTDnVsLMMEL = list(set(listTGFBEMTDn).intersection(setLMMELGenes))
 
+			# Create a set of arrays for the output data;
+			# NB: to avoid a number of pandas allocation warnings this is done as arrays which are later loaded into the
+			#  output dataframe
             arrayBottcherNKScore = np.zeros(numTotSamples,
                                             dtype=np.float)
             arrayBottcherDCScore = np.zeros(numTotSamples,
@@ -331,6 +370,7 @@ class PreProc:
             arrayTGFBEMTScoreVsLMMEL = np.zeros(numTotSamples,
                                     dtype=np.float)
 
+			# step through each sample and perform scoring for the appropriate gene sets
             print('Scoring TCGA samples for various gene sets/signatures')
             for iSample in range(numTotSamples):
                 print('Sample ' + '{}'.format(iSample+1) + ' of ' + '{}'.format(numTotSamples))
@@ -392,6 +432,7 @@ class PreProc:
                     listDownGenesToScore=listTGFBEMTDnVsLMMEL,
                     flagApplyNorm=True)
 
+			# Load the numpy arrays into the appropriate columns within the output dataframe
             dfRSEMOut['NK Score'] = arrayNKScore
             dfRSEMOut['NK-Cytokine Score'] = arrayNKScore
             dfRSEMOut['NK-Cytotoxic Score'] = arrayNKScore
@@ -407,15 +448,18 @@ class PreProc:
             dfRSEMOut['Epithelial Score (vs. LM-MEL)'] = arrayEpiScoreVsLMMEL
             dfRSEMOut['Mesenchymal Score (vs. LM-MEL)'] = arrayMesScoreVsLMMEL
 
-
+			# join the RNA & gene set score data to the clinical data 
             dfMerged = dfRSEMOut.join(dfClinDataOut)
 
+			# save the resulting dataframe for re-loading
             dfMerged.to_pickle(strMergedFileName)
 
         else:
-
+			
+			# load the pre-processed dataframe
             dfMerged = pd.read_pickle(strMergedFileName)
 
+			# extract required information
             dfRSEMData = PreProc.tcga_skcm_rna_data()
             listTCGAGenes = dfRSEMData.index.tolist()
 
@@ -424,7 +468,8 @@ class PreProc:
                            'age_at_diagnosis',
                            'death_event',
                            'surv_time']
-
+						   
+		# return a dictionary with the required information
         return {'df':dfMerged,
                 'listGenes':listTCGAGenes,
                 'listClin':listClinDataOut}
@@ -439,6 +484,7 @@ class PreProc:
         dictTCGASKCM = PreProc.tcga_skcm_data()
         listTCGAGenes = dictTCGASKCM['listGenes']
 
+		# load a dictionary which maps between HGNC synonyms using the downloadable HGNC database
         dictHGNCSynonyms = HGNCFunctions.Mapping.create_synonym_dict()
         # unfortunately I need to hard code a couple of synonyms which aren't being picked up from the database export
         dictHGNCSynonyms['TNFRSF14B'] = 'TNFRSF13B'
@@ -676,7 +722,9 @@ class PreProc:
     def lm_mel_data(flagResult=False,
                     flagPerformExtraction=False,
                     strTempFileName='proc_LMMEL.pickle'):
-
+		"""Process the LM-MEL microarray data and return a dataframe for later indexing"""
+		
+		# specify some thresholds used for pre-processing of the LM-MEL data
         numLMMelDynValueThresh = 4.5
         numFractReqAboveThresh = 0.15
 
@@ -684,14 +732,21 @@ class PreProc:
             flagPerformExtraction = True
 
         if flagPerformExtraction:
+			# load the LM-MEL mRNA abundance data
             dfLMMELIn = LMMelTools.LMMelData.mrna_abundance()
+			
+			# identify the cell lines
             listLMMELIndex = dfLMMELIn.index.tolist()
             listLMMELLines = [strIndex for strIndex in listLMMELIndex if strIndex[0:len('LM-MEL')] == 'LM-MEL']
             arraySampleRows = np.where([strRow in listLMMELLines for strRow in listLMMELIndex])[0]
             numCellLines = len(arraySampleRows)
 
+			# identify the genes
             listLMMELGenes = dfLMMELIn.loc['Symbol'].tolist()
 
+			# retain only genes which have a good dynamic range (range of abundances), and genes where expression exceeds a
+			#  specified threshold within a certain subset of cells (numLMMelDynValueThresh & numFractReqAboveThresh, 
+			#  specified above)
             print('Cleaning LM-MEL mRNA transcript abundance data.. this may take some time')
             arrayNumLinesHaveGeneAboveThresh = \
                 np.sum(dfLMMELIn.loc[listLMMELLines].values.astype(np.float) > numLMMelDynValueThresh,
@@ -699,45 +754,49 @@ class PreProc:
             arrayGeneHasGoodDynRange = arrayNumLinesHaveGeneAboveThresh >= numFractReqAboveThresh*len(listLMMELLines)
             arrayGeneIndicesGoodDynRange = np.where(arrayGeneHasGoodDynRange)[0]
 
-            # drop all columns which have low quality probes
-
+            # drop all columns which have low quality probes with a poor signal
             listUniqueOutputGenes = dfLMMELIn.loc['Symbol', arrayGeneIndicesGoodDynRange].unique().tolist()
             listUniqueOutputGenes.remove(np.nan)
             setUniqueOutputGenes = set(listUniqueOutputGenes)
 
+			# produce an output dataframe
             dfLMMEL = pd.DataFrame(data=np.zeros((len(listLMMELLines),len(listUniqueOutputGenes)),
                                                  dtype=np.float),
                                    index=listLMMELLines,
                                    columns=listUniqueOutputGenes)
 
+			# In Fig. S9 the TCGA and LM-MEL data are compared through gene set scoring thus a consistent set of shared genes
+			#  must first be identified
             dictTCGASKCM = PreProc.tcga_skcm_data(flagPerformExtraction=False)
             listTCGAGenes = dictTCGASKCM['listGenes']
             setTCGAGenes = set(listTCGAGenes)
-
             listUniqueOutputGenesVsTCGA = list(setUniqueOutputGenes.intersection(setTCGAGenes))
-
+			
+			# As there is some multimapping in the LM-MEL microarray data (multiple probes -> one gene), take the median value
+			#  across any probes that passed earlier filtering
             for strGene in listUniqueOutputGenes:
                 arrayColIndicesForGene = \
                     np.where(
                         np.bitwise_and([strGene == strGeneToCheck for strGeneToCheck in listLMMELGenes],
                                        arrayGeneHasGoodDynRange))[0]
-
                 dfLMMEL[strGene] =\
                     np.median(dfLMMELIn.iloc[arraySampleRows,arrayColIndicesForGene].values.astype(np.float), axis=1)
 
-
+			# Extract the Foroutan TGF-B EMT gene signature
             dictTGFBEMTScore = GeneSetScoring.ExtractList.foroutan2016_tgfb_mes_score()
             listTGFBEMTUp = list(set(dictTGFBEMTScore['Up']).intersection(set(listUniqueOutputGenes)))
             listTGFBEMTDn = list(set(dictTGFBEMTScore['Down']).intersection(set(listUniqueOutputGenes)))
             listTGFBEMTUpVsTCGA = list(set(listTGFBEMTUp).intersection(setTCGAGenes))
             listTGFBEMTDnVsTCGA = list(set(listTGFBEMTDn).intersection(setTCGAGenes))
 
+			# Extract the Tan Epithelial & Mesenchymal gene signatures
             dictTanEMTSigs = GeneSetScoring.ExtractList.tan2012_cell_line_genes()
             listEpiGenes = list(set(dictTanEMTSigs['epi_genes']).intersection(set(listUniqueOutputGenes)))
             listMesGenes = list(set(dictTanEMTSigs['mes_genes']).intersection(set(listUniqueOutputGenes)))
             listEpiGenesVsTCGA = list(set(listEpiGenes).intersection(setTCGAGenes))
             listMesGenesVsTCGA = list(set(listMesGenes).intersection(setTCGAGenes))
 
+			# create arrays for the initial scoring to avoid a number of warnings from pandas
             arrayEpiScore = np.zeros(numCellLines,
                                     dtype=np.float)
             arrayMesScore = np.zeros(numCellLines,
@@ -751,6 +810,7 @@ class PreProc:
             arrayTGFBEMTScoreVsTCGA = np.zeros(numCellLines,
                                     dtype=np.float)
 
+			# step through each cell line and score for the required gene sets
             print('Scoring TCGA samples for various gene sets/signatures')
             for iSample in range(numCellLines):
                 print('Sample ' + '{}'.format(iSample+1) + ' of ' + '{}'.format(numCellLines))
@@ -789,6 +849,7 @@ class PreProc:
                     listDownGenesToScore=listTGFBEMTDnVsTCGA,
                     flagApplyNorm=True)
 
+			# map gene set scores to the appropriate columns within the output dataframe
             dfLMMEL['TGF-B EMT Score'] = arrayTGFBEMTScore
             dfLMMEL['Epithelial Score'] = arrayEpiScore
             dfLMMEL['Mesenchymal Score'] = arrayMesScore
@@ -796,10 +857,12 @@ class PreProc:
             dfLMMEL['Epithelial Score (vs. TCGA)'] = arrayEpiScoreVsTCGA
             dfLMMEL['Mesenchymal Score (vs. TCGA)'] = arrayMesScoreVsTCGA
 
+			# save as a pickle for later re-use
             dfLMMEL.to_pickle(strTempFileName)
 
         else:
-
+		
+			# load the pre-processed pickle
             dfLMMEL = pd.read_pickle(strTempFileName)
 
         return dfLMMEL
@@ -808,16 +871,26 @@ class PreProc:
                       strDataLoc='D:\\db\\geo\\GSE60424',
                       strDataFile='bldCells_TPM.tsv',
                       strMetaDataFile='SraRunTable.txt'):
-
+		"""Process the Linsley et al data and return a dataframe for later indexing.
+			Linsley PS, et al. (2014). Copy number loss of the interferon gene cluster in melanomas is 
+			linked to reduced T cell infiltrate and poor patient prognosis. PLoS One. 9(10):e109760. 
+			DOI: 10.1371/journal.pone.0109760"""
+		
+		# A TPM normalised version of the data from GSE60424 (Linsley et al) was prepared by M Foroutan (see corresponding R data)
+		# --> load the gene expression data
         dfData = pd.read_table(os.path.join(strDataLoc, strDataFile), sep='\t', header=0, index_col=0)
         listGenesEntrez = dfData.index.tolist()
         listSamples = dfData.columns.tolist()
 
+		# load a sample metadata table which maps sample IDs to labels
         dfMetaData = pd.read_table(os.path.join(strDataLoc, strMetaDataFile), sep='\t', header=0, index_col=None)
 
+		# load a dictionary for mapping HGNC symbols to Entrez gene IDs and invert it
         dictHGNZToEntrez = BiomartFunctions.IdentMappers.defineHGNCSymbolToEntrezIDDict()
         dictEntrezToHGNC = dict(zip(dictHGNZToEntrez.values(),dictHGNZToEntrez.keys()))
 
+		# step through all genes in the data and convert to HGNC symbols where available (if absent retain the Entrez number as
+		#  a string with the 'Entrez:' prefix)
         listGenesHGNC = []
         for numEntrez in listGenesEntrez:
             strHGNC = 'Entrez:' + '{}'.format(numEntrez)
@@ -826,13 +899,17 @@ class PreProc:
                     strHGNC = dictEntrezToHGNC[numEntrez]
             listGenesHGNC.append(strHGNC)
 
-        listSamplesCellType = [dfMetaData['celltype_s'][dfMetaData['Run_s'] == strSample].values[0] for strSample in listSamples]
+		# map sample cell types from the metadata table and use this to create a dictionary for later mapping
+        listSamplesCellType = [dfMetaData['celltype_s'][dfMetaData['Run_s'] == strSample].values[0]
+							   for strSample in listSamples]
         dictSampleIDToType = dict(zip(listSamples, listSamplesCellType))
 
+		# create an output dataframe
         dfOut=pd.DataFrame(data=dfData.values,
                            index=listGenesHGNC,
                            columns=listSamples)
-
+						   
+		# return the dataframe together with a dictionary for mapping samples
         return dfOut, dictSampleIDToType
 
 
@@ -843,12 +920,18 @@ class PreProc:
                       flagPerformExtraction=False,
                       strProcDataFilename='GSE24759_proc.pickle',
                       strProcMetaDataFilename='GSE24759_metadata_proc.pickle'):
+		"""Process the Novershtern et al data and return a dataframe for later indexing.
+			Novershtern N, et al. (2011). Densely interconnected transcriptional circuits control cell states
+			in human hematopoiesis. Cell. 144(2): 296-309. 
+			DOI: 10.1016/j.cell.2011.01.004"""
 
         if not np.bitwise_and(os.path.exists(os.path.join(strDataLoc, strProcDataFilename)),
                               os.path.exists(os.path.join(strDataLoc, strProcMetaDataFilename))):
             flagPerformExtraction = True
 
         if flagPerformExtraction:
+			# extract the first 56 lines from the metadata file; due to the formatting this file has issues
+			#  when trying to parse with pandas
             listMetaData = []
             with open(os.path.join(strDataLoc, strDataFile), 'r+') as handFile:
                 counter = 0
@@ -856,37 +939,46 @@ class PreProc:
                     listMetaData.append(line)
                     counter += 1
                     if counter == 56: break
-
+					
+			# step through the resulting list and identify specific rows
             numSampleIDRow = np.where(['!Series_sample_id' in strRow for strRow in listMetaData])[0][0]
             numSampleTitleRow = np.where(['!Sample_title' in strRow for strRow in listMetaData])[0][0]
             numSampleSourceRow = np.where(['!Sample_source_name' in strRow for strRow in listMetaData])[0][0]
 
+			# Process the row containing sample IDs and produce a new list (listSampleIDs)
             strSampleIDsIn = listMetaData[numSampleIDRow]
             strIDsClean = strSampleIDsIn.split('!Series_sample_id\t"')[1]
             strIDsCleaner = strIDsClean.split(' "\n')[0]
             listSampleIDs = strIDsCleaner.split(' ')
 
+			# Process the row containing sample titles and produce a new list (listSampleTitles)
             strSampleTitlesIn = listMetaData[numSampleTitleRow]
             strTitlesClean = strSampleTitlesIn.split('!Sample_title\t"')[1]
             strTitlesCleaner = strTitlesClean.split('"\n')[0]
             listSampleTitles = strTitlesCleaner.split('"\t"')
 
+			# Process the row containing sample sources and produce a new list (listSampleSources)
             strSampleSourcesIn = listMetaData[numSampleSourceRow]
             strSourcesClean = strSampleSourcesIn.split('!Sample_source_name_ch1\t"')[1]
             strSourcesCleaner = strSourcesClean.split('"\n')[0]
             listSampleSources = strSourcesCleaner.split('"\t"')
 
+			# read in the expression/microarray data
             dfData = pd.read_table(os.path.join(strDataLoc, strDataFile), sep='\t', header=0, index_col=0,
                                    comment='!')
             listProbes = dfData.index.tolist()
-
+			
+			# create an output dataframe for the metadata
             dfMetaData = pd.DataFrame(data=[listSampleTitles,listSampleSources],
                                       index=['Title','Source'],
                                       columns=listSampleIDs)
-
+			
+			# read in the table which maps probes to genes
             dfProbeMap = pd.read_table(os.path.join(strDataLoc, strProbeMapFile),
                                        sep='\t', header=0, index_col=0,
                                    comment='#')
+
+			# map probes to gene symbols if possible
             listProbesToGenes = []
             for strProbe in listProbes:
                 strGene = 'failed_map:' + strProbe
@@ -895,30 +987,39 @@ class PreProc:
                         strGene = dfProbeMap['Gene Symbol'].loc[strProbe]
                 listProbesToGenes.append(strGene)
 
+			# take a set to identify the unique list of genes
             print('Merging genes across probes, this may take some time..')
             listOutGenes = sorted(list(set(listProbesToGenes)))
 
+			# create an output array and populate with transcript abundance data
             arrayOutData = np.zeros((len(listOutGenes), np.shape(dfData)[1]),
                                     dtype=np.float)
             for iGene in range(len(listOutGenes)):
                 arrayGeneOrigRowIndices = np.where([strGene == listOutGenes[iGene] for strGene in listProbesToGenes])[0]
                 arrayOutData[iGene,:] = np.median(dfData.iloc[arrayGeneOrigRowIndices,:], axis=0)
 
+			# load into an output dataframe
             dfOut = pd.DataFrame(data=arrayOutData,
                                  columns=dfData.columns,
                                  index=listOutGenes)
-
+			# save the transcript abundance and sample metadata to pickle for later re-use
             dfOut.to_pickle(os.path.join(strDataLoc, strProcDataFilename))
             dfMetaData.to_pickle(os.path.join(strDataLoc, strProcMetaDataFilename))
 
         else:
+			# load the pre-processed transcript abundance and metadata
             dfOut = pd.read_pickle(os.path.join(strDataLoc, strProcDataFilename))
             dfMetaData = pd.read_pickle(os.path.join(strDataLoc, strProcMetaDataFilename))
 
         return dfOut, dfMetaData
 
     def gse24759_subsets(flagResult=False):
-
+		"""Specify the samples & groups to be retained from the Novershtern et al data and return a dicinoary for later indexing.
+			Novershtern N, et al. (2011). Densely interconnected transcriptional circuits control cell states
+			in human hematopoiesis. Cell. 144(2): 296-309. 
+			DOI: 10.1016/j.cell.2011.01.004"""
+		
+		# create a list of all samples grouped by similar cell types
         listOfListsAllSamplesTypeGrouped = [['Pro B-cell', 'Early B-cell'],
                                             ['NaÃ¯ve B-cells', 'Mature B-cell class able to switch',
                                              'Mature B-cell class switched', 'Mature B-cells'],
@@ -964,6 +1065,7 @@ class PreProc:
         #         'Mature NK cell_CD56- CD16+ CD3-'
         #         'Megakaryocyte'
 
+		# create a list of output samples grouped by similar cell types
         listOfListsSampleTypeGrouped = [['Pro B-cell', 'Early B-cell'],
                                         ['NaÃ¯ve B-cells', 'Mature B-cell class able to switch',
                                          'Mature B-cell class switched', 'Mature B-cells'],
@@ -989,7 +1091,8 @@ class PreProc:
                                          'CD8+ Effector Memory',
                                          'CD8+ Effector Memory RA'],
                                         ['NKT']]
-
+										
+		# create a list which labels the groups of output samples
         listSampleTypeLabels = ['Immature B cells',
                                 'Mature B cells',
                                 'Baso/Eosinophils',
@@ -1004,49 +1107,39 @@ class PreProc:
                                 'CD4$^{+}$ T cells',
                                 'CD8$^{+}$ T cells',
                                 'NK T cells']
-        # listSmpTypePlotOrder = [strCellType
-        #                         for listGroup in listOfListsSampleTypeGrouped
-        #                         for strCellType in listGroup]
-        # listSmpTypeAll= [strCellType
-        #                  for listGroup in listOfListsAllSamplesTypeGrouped
-        #                  for strCellType in listGroup]
 
+		# return these lists as a dictionary
         return {'listOfListsSampleTypeGrouped':listOfListsSampleTypeGrouped,
                 'listOfListsAllSamplesTypeGrouped':listOfListsAllSamplesTypeGrouped,
-                'listSampleTypeLabels':listSampleTypeLabels,
-                # 'listSmpTypePlotOrder':listSmpTypePlotOrder,
-                # 'listSmpTypeAll':listSmpTypeAll
+                'listSampleTypeLabels':listSampleTypeLabels
                 }
 
-
-    def tcga_histology(flagResult=False,
-                       strDataLoc='D:\\db\\tcga\\path_imaging',
-                       strDataFile='mmc2.xlsx'):
-
-        dfIn = pd.read_excel(os.path.join(strDataLoc, strDataFile),
-                             sheet_name='TILMap_TableS1.txt', header=0, index_col=0)
-
-        dfData = dfIn[dfIn['Study']=='SKCM'].copy(deep=True)
-
-        return dfData
 
     def density_scatters(flagResult=False,
                          arrayXIn=np.zeros(1,dtype=np.float),
                          arrayYIn=np.zeros(1,dtype=np.float)):
-
+		"""Process matched X/Y vectors and calculate the local density of samples for
+			colouring scatter plots"""
+		# use the np.vstack function to merge the x/y vectors into a 2D array
         arrayJointDist = np.vstack([arrayXIn, arrayYIn])
+		# perform Gaussian kernel density estimation across these data
         arrayJointProb = gaussian_kde(arrayJointDist)(arrayJointDist)
 
+		# sort the samples by their z-position to prevent weird plotting effects
         arrayIndexByZPos = arrayJointProb.argsort()
         arrayXToPlot, arrayYToPlot, arrayZForColor = \
             arrayXIn[arrayIndexByZPos], \
             arrayYIn[arrayIndexByZPos], \
             arrayJointProb[arrayIndexByZPos]
-
+			
+		# output (x,y) coordinates + a density array for color
         return arrayXToPlot, arrayYToPlot, arrayZForColor
 
     def refine_NK_signature(flagResult=False):
+		"""Process results from the differential expression analysis of bulk sorted cells and examine
+			single cell transcript abundance to refine the NK signature genes"""
 
+		# load a dictionary for mapping between ENSEMBL gene IDs and HGNC symbols and reverse this
         dictENSGToHGNC = ENSEMBLTools.Load.dict_ensg_to_hgnc()
         dictHGNCToENSG = dict(zip(dictENSGToHGNC.values(),dictENSGToHGNC.keys()))
 
@@ -1056,32 +1149,29 @@ class PreProc:
         dictHGNCToENSG['CCL5'] = 'ENSG00000161570'
         dictENSGToHGNC['ENSG00000161570'] = 'CCL5'
 
+		# Load the Huntington NK gene lists
         dictHuntingtonGenes = GeneSetScoring.ExtractList.huntington_nk_markers()
-        # ['NK cells activated', 'NK cells resting']
+		
+        # Load the CIBERSORT/LM22 (Newmann et al) gene lists
         dictOfDictsCIBERSORTLists = GeneSetScoring.ExtractList.cibersort_genes()
 
+		# Load the LM7 (Tosolini et al) gene lists
         dictOfDictsLM7Lists = GeneSetScoring.ExtractList.tosolini_lm7_subset()
 
+		# create sets/unique lists
         setCIBERSORTRestingUp = set(dictOfDictsCIBERSORTLists['NK cells resting']['UpGenes'])
-        setCIBERSORTRestingDown = set(dictOfDictsCIBERSORTLists['NK cells resting']['DownGenes'])
         setCIBERSORTActivatedUp = set(dictOfDictsCIBERSORTLists['NK cells activated']['UpGenes'])
-        setCIBERSORTActivatedDown = set(dictOfDictsCIBERSORTLists['NK cells activated']['DownGenes'])
-
-        setCIBERSORTCombined = setCIBERSORTRestingUp.union(setCIBERSORTRestingDown).union(setCIBERSORTActivatedUp).union(setCIBERSORTActivatedDown)
-
+        setCIBERSORTCombined = setCIBERSORTRestingUp.union(setCIBERSORTActivatedUp)
         setHuntingtonUp = set(dictHuntingtonGenes['UpGenes'])
-        setHuntingtonDown = set(dictHuntingtonGenes['DownGenes'])
-
         setLM7Up = set(dictOfDictsLM7Lists['NK']['UpGenes'])
 
+		# create an 'initial' NK gene list from the union of the LM7, LM22 & Huntington NK gene lists
         listInitialNKMarkerHGNC = list(setCIBERSORTRestingUp.union(setCIBERSORTActivatedUp.union(setHuntingtonUp.union(setLM7Up))))
-        # listGenesDown = list(setCIBERSORTRestingDown.union(setCIBERSORTActivatedDown.union(setHuntingtonDown)))
 
+		# remove the nan value which has crept in
         listInitialNKMarkerHGNC.remove(np.nan)
 
-        # listGenesInitialUnion = sorted(listGenesUp) + sorted(listGenesDown)
-        # listGeneDir = ['Up'] * len(listGenesUp) + ['Down'] * len(listGenesDown)
-
+		# create an output dataframe
         dfAllNKGenes = pd.DataFrame(data=[],
                                     index=listInitialNKMarkerHGNC)
         dfAllNKGenes.to_csv(os.path.join(Plot.strOutputFolder, 'NK_genes_initial.tsv'),
@@ -1092,15 +1182,19 @@ class PreProc:
         listInitialNKMarkerENSG = [dictHGNCToENSG[strGene]
                                    for strGene in listInitialNKMarkerHGNC if strGene in dictHGNCToENSG.keys()]
 
-
+		# load the differential expression analysis results from the bulk sorted immune populations (see the corresponding
+		#  R code associated with this repository)
         dfBulkRNATest = pd.read_table(os.path.join(PreProc.strExtraAnalysisPath, 'DEstat_sigCombined.txt'),
                                       sep='\t', header=0, index_col=None)
         listBulkRNAGenes = dfBulkRNATest['SYMBOL'].tolist()
 
+		# check for genes that are significantly differentially expressed with a logFC > 1 (i.e. apply the TREAT criteria)
         listGenesPassBulkRNATest = \
             dfBulkRNATest['SYMBOL'][np.bitwise_and(dfBulkRNATest['logFC'].values.astype(np.float) > 1,
                                                    dfBulkRNATest['adj.P.Val'].values.astype(np.float) < 0.05)].tolist()
 
+		# load the summary statistics from the Tirosh et al single cell data (see the corresponding
+		#  R code associated with this repository)
         dfSingleCellRNASummaryStats = \
             pd.read_table(os.path.join(PreProc.strExtraAnalysisPath,
                                        'NK_CombinedSig_GeneSummary_Tirosh.txt'),
@@ -1109,17 +1203,22 @@ class PreProc:
         numDropoutMedianThresh = 0.5
         numDropoutNKUpperQThresh = 2.67
 
+		# extract the genes within this dataframe
         listGenesInSingleCellData = dfSingleCellRNASummaryStats['Genes'].unique().tolist()
-        # listCellTypesInSingleCellData = dfSingleCellRNASummaryStats['Non.malignant'].unique().tolist()
+		
+		# extract the cell types within the dataframe excluding NK cells
         listNonNKCellTypesInSingleCellData = dfSingleCellRNASummaryStats['Non.malignant'].unique().tolist()
         listNonNKCellTypesInSingleCellData.remove('NK')
 
+		# step through each gene
         listGenesPassSingleCellTest = []
         for strGene in listGenesInSingleCellData:
+			# extract the median abundance of all cells to check for extensive dropout
             arrayAllCellMedian = \
                 dfSingleCellRNASummaryStats['median'][
                     dfSingleCellRNASummaryStats['Genes']==strGene].values.astype(np.float)
 
+			# extract the upper quartile/75th percentile & median value within non-NK cells
             arrayOtherCellUpperQ = \
                 dfSingleCellRNASummaryStats['thirdQ'][
                     np.bitwise_and(dfSingleCellRNASummaryStats['Genes'] == strGene,
@@ -1133,67 +1232,63 @@ class PreProc:
                                        '|'.join(listNonNKCellTypesInSingleCellData)))].values.astype(np.float)
 
             if np.all(arrayAllCellMedian < numDropoutMedianThresh):
+				# consider the gene as heavily influenced by dropout; examine the upper quartile of expression within NK cells
                 numNKUpperQ = \
                     dfSingleCellRNASummaryStats['thirdQ'][
                         np.bitwise_and(dfSingleCellRNASummaryStats['Genes']==strGene,
                                        dfSingleCellRNASummaryStats['Non.malignant'] == 'NK')].values.astype(np.float)
-
+				# compare the upper quartile from NK cells to all other cell types and check against a dropout threshold
                 if np.bitwise_and(numNKUpperQ > numDropoutNKUpperQThresh,
                                   np.all(numNKUpperQ > arrayOtherCellUpperQ)):
                     listGenesPassSingleCellTest.append(strGene)
 
             else:
-
+				# consider the gene as not heavily influenced by dropout
                 numNKLowerQ = \
                     dfSingleCellRNASummaryStats['firstQ'][
                         np.bitwise_and(dfSingleCellRNASummaryStats['Genes'] == strGene,
                                        dfSingleCellRNASummaryStats['Non.malignant'] == 'NK')].values.astype(np.float)
-
+				# compare the lower quartile from NK cells to the median from all other cell types
                 if np.all(numNKLowerQ > arrayOtherCellMedian):
                     listGenesPassSingleCellTest.append(strGene)
 
-
+		# identify the set of genes which pass through both tests
         listGenesPassNKVsImmune = list(set(listGenesPassBulkRNATest).intersection(set(listGenesPassSingleCellTest)))
-        #
-        # listGenesPassNKVsImmuneENSG = [dictHGNCToENSG[strGene] for strGene in listGenesPassNKVsImmune
-        #                                  if strGene in dictHGNCToENSG.keys()]
 
+		# load cell line mapping data from Cellosaurus
         dfCellosaurus = Cellosaurus.Load.parse_input_file()
         listCellosaurusCCLENames = dfCellosaurus['CCLE_ID'].unique().tolist()
         listCellosaurusCCLENames.remove('na')
 
+		# identify cell lines which are derived from solid tumours (i.e. not haematopoeitic and lymphoid)
         listNonHaemAndLymphLines = [strCellLine
                                     for strCellLine in listCellosaurusCCLENames
                                     if 'HAEMATOPOIETIC_AND_LYMPHOID_TISSUE' not in strCellLine]
         arrayCellosaurusRowIsOfInt = np.array([strCellLine in listNonHaemAndLymphLines
                                                for strCellLine in dfCellosaurus['CCLE_ID'].values.tolist()],
                                               dtype=np.bool)
-
+		# convert to CVCL IDs for indexing the CCLE data
         listNonHaemAndLymphLineCVCLs = [dfCellosaurus['CVCL_ID'].values.tolist()[i]
                                         for i in np.where(arrayCellosaurusRowIsOfInt)[0]]
 
+		# Load the CCLE RNA transcript abundance data
         dfCCLE, dictHeaderToCVCL = CCLETools.Load.rnaseq_transcript_abundance()
+		# Extract CCLE cell lines
         listCCLEColumns = dfCCLE.columns.tolist()
         listCCLECVCLs = [dictHeaderToCVCL[strCellLine] for strCellLine in listCCLEColumns]
+		# Extract CCLE genes
         listCCLEIndex = dfCCLE.index.tolist()
         listCCLEGenes = [strRow for strRow in listCCLEIndex if strRow[0:4]=='ENSG']
         dictCVCLToCCLEHeader = dict(zip(dictHeaderToCVCL.values(),
                                         dictHeaderToCVCL.keys()))
 
+		# Identify the 25th percentile of abundance from all non-zero values
         arrayFlatAllCCLEData = \
             np.nan_to_num(np.ravel(dfCCLE.reindex(listCCLEGenes).values.astype(np.float)))
         arrayLogNonZeroCCLEData = np.log2(arrayFlatAllCCLEData[arrayFlatAllCCLEData > 0] + 1)
-
         numCCLEAbundThresh = np.percentile(arrayLogNonZeroCCLEData, 25)
 
-        #
-        # arrayPercentilesToCheck = np.linspace(start=0, stop=100, num=101)
-        #
-        # arrayCCLEPercentileValues = np.percentile(arrayLogNonZeroCCLEData, arrayPercentilesToCheck)
-        #
-        # # print(arrayPercentilesToCheck)
-        # # print(arrayLogNonZeroCCLEData)
-        #
+		
         listNonHaemAndLymphLineCVCLsInCCLE = [strCVCL for strCVCL in listNonHaemAndLymphLineCVCLs
                                               if strCVCL in listCCLECVCLs]
 
@@ -1203,115 +1298,18 @@ class PreProc:
         listInitialNKMarkerENSGInCCLE = [strGene for strGene in listInitialNKMarkerENSG if
                                           strGene in listCCLEIndex]
 
+		# Determine the median abundance of all genes across the CCLE solid cancer cell lines and compare this to the
+		#  25th percentile threshold derived above
         arrayGeneAbund = \
             np.log2(np.nan_to_num(
                 dfCCLE[listCCLEColumnsToPlot].reindex(listInitialNKMarkerENSGInCCLE).values.astype(np.float)) + 1)
         arrayMedianIsBelowThresh = np.median(arrayGeneAbund, axis=1) < numCCLEAbundThresh
 
+		# identify genes which do not show high expression across the CCLE data
         listENSGMedianBelowCCLEThresh = [listInitialNKMarkerENSGInCCLE[i] for i in np.where(arrayMedianIsBelowThresh)[0]]
         listGeneMedianBelowCCLEThresh = [dictENSGToHGNC[strGene] for strGene in listENSGMedianBelowCCLEThresh]
 
-        # listGenesForPrelimScoring = [strGene for strGene in listGenesPassNKVsImmune
-        #                              if strGene in listGeneMedianBelowCCLEThresh]
-
-        #
-        # arrayFlatAbundDataToPlot = \
-        #     np.log2(np.nan_to_num(np.ravel(
-        #         dfCCLE[listCCLEColumnsToPlot].reindex(listENSGForPrelimScoringInCCLE).values.astype(np.float))) + 1)
-        #
-        # numMinAbund = np.min(arrayFlatAbundDataToPlot)
-        # numMaxAbund = np.max(arrayFlatAbundDataToPlot)
-        # numAbundRange = numMaxAbund - numMinAbund
-        #
-        # arrayXLim = np.array([numMinAbund - 0.02*numAbundRange,
-        #                       numMaxAbund + 0.05*numAbundRange], dtype=np.float)
-        # numXRange = np.ptp(arrayXLim)
-        #
-        # listOfGeneAbunds = []
-        # for iGene in range(len(listENSGForPrelimScoringInCCLE)):
-        #     strGene = listENSGForPrelimScoringInCCLE[iGene]
-        #
-        #     arrayGeneAbund = np.log2(np.nan_to_num(dfCCLE[listCCLEColumnsToPlot].loc[strGene].values.astype(np.float))+1)
-        #     listOfGeneAbunds.append(arrayGeneAbund)
-        #
-        # handFig = plt.figure()
-        # handFig.set_size_inches(w=5,h=9)
-        #
-        # handAx = handFig.add_axes([0.20, 0.22, 0.76, 0.70])
-        # handAx.boxplot(listOfGeneAbunds, vert=False,
-        #                widths=0.5,
-        #                flierprops={'markersize':3,
-        #                            'marker':'o',
-        #                            'markerfacecolor':'r',
-        #                            'alpha':0.75,
-        #                            'markeredgecolor':None})
-        #
-        # handAx.axvline(x=np.percentile(arrayLogNonZeroCCLEData, 25),
-        #                ymin=0.0,
-        #                ymax=1.0,
-        #                color=[0.5, 0.2, 0.5],
-        #                linewidth=0.5)
-        #
-        # handAx.set_yticks([])
-        # handAx.set_yticklabels([])
-        #
-        # for iGene in range(len(listENSGForPrelimScoringInCCLE)):
-        #     strGene = listENSGForPrelimScoringInCCLE[iGene]
-        #
-        #     handAx.text(x=arrayXLim[0] - 0.03*numXRange,
-        #                 y=iGene+1,
-        #                 s=dictENSGToHGNC[strGene],
-        #                 ha='right', va='center',
-        #                 fontsize=Plot.numFontSize)
-        #
-        # handAx.set_xlim(arrayXLim)
-        #
-        # handAx.set_xlabel('log$_{2}$(TPM+1)', fontsize=Plot.numFontSize)
-        # handAx.set_title('Cancer Cell Line Encyclopedia RNA abundance\n(excluding haematopoietic and lymphoid cell lines)',
-        #                  fontsize=Plot.numFontSize)
-        #
-        # handAx = handFig.add_axes([0.20, 0.02, 0.76, 0.14])
-        #
-        # handAx.plot(arrayCCLEPercentileValues,
-        #             arrayPercentilesToCheck,
-        #             'k-')
-        # handAx.axhline(y=25, xmin=0.0, xmax=1.0, color='r', alpha=0.5, linewidth=0.75)
-        # handAx.axhline(y=50, xmin=0.0, xmax=1.0, color='r', alpha=0.5, linewidth=0.75)
-        # handAx.axhline(y=75, xmin=0.0, xmax=1.0, color='r', alpha=0.5, linewidth=0.75)
-        # handAx.axvline(x=np.percentile(arrayLogNonZeroCCLEData, 25),
-        #                ymin=0.0,
-        #                ymax=1.0,
-        #                color=[0.5, 0.2, 0.5],
-        #                linewidth=0.5)
-        #
-        # handAx.set_xlim(arrayXLim)
-        # handAx.set_ylim([0, 100])
-        # handAx.set_ylabel('Cumulative\ndensity\n(non-zero values)')
-        # handAx.set_xticks(np.arange(start=0.0,stop=16.0, step=2.0))
-        # handAx.set_xticklabels([])
-        #
-        # handFig.savefig(os.path.join(Plot.strOutputFolder, 'PrelimFilt_NKSigGenes_inCCLE.png'),
-        #                 ext='png', dpi=300)
-        # plt.close(handFig)
-        #
-        # listPrelimScoringGenesInTCGA = list(set(listGenesForPrelimScoring).intersection(set(listTCGAGenes)))
-        #
-        # print('Scoring TCGA samples for various gene sets/signatures')
-        # for iSample in range(numTCGASamples):
-        # # for iSample in range(30):
-        #     print('Sample ' + '{}'.format(iSample + 1) + ' of ' + '{}'.format(numTCGASamples))
-        #     arrayNKScore[iSample] = GeneSetScoring.FromInput.single_sample_rank_score(
-        #         listAllGenes=listTCGAGenes,
-        #         arrayTranscriptAbundance=dfTCGASKCMRNA.iloc[:,iSample].values.astype(np.float),
-        #         listUpGenesToScore=listPrelimScoringGenesInTCGA,
-        #         flagApplyNorm=True)
-        #
-        # dfTCGASKCMProc = dfTCGASKCMRNA.transpose().copy(deep=True)
-        #
-        # dfTCGASKCMProc['Prelim. NK Score'] = arrayNKScore
-        #
-        # dfScoreGeneCorr = dfTCGASKCMProc[listGenesInitialUnionInTCGA].corrwith(dfTCGASKCMProc['Prelim. NK Score'])
-
+		# create a series of lists with output gene properties
         listIsLM22 = []
         listIsLM7 = []
         listIsHuntington = []
@@ -1321,7 +1319,8 @@ class PreProc:
         listBulkTestPVal = []
         listPassesCCLETests = []
         listRetainedGene = []
-
+		
+		# step through each gene and populate the output lists
         for strGene in listInitialNKMarkerHGNC:
             if strGene in setHuntingtonUp:
                 listIsHuntington.append(True)
@@ -1372,7 +1371,8 @@ class PreProc:
                 listRetainedGene.append(True)
             else:
                 listRetainedGene.append(False)
-
+		
+		# load the gene properties into the appropriate columns of an output dataframe
         dfAllNKGenes['Pass_bulk_tests'] = pd.Series(listPassesBulkTests, index=listInitialNKMarkerHGNC)
         dfAllNKGenes['Pass_scRNA_tests'] = pd.Series(listPassesSingCellTests, index=listInitialNKMarkerHGNC)
         dfAllNKGenes['Pass_CCLE_abund_tests'] = pd.Series(listPassesCCLETests, index=listInitialNKMarkerHGNC)
@@ -1389,6 +1389,7 @@ class PreProc:
                                                   index=listInitialNKMarkerHGNC)
 
 
+		# step through the processed single-cell data and calculate information for output
         listSingleCellStats = ['min', 'firstQ', 'median', 'mean', 'thirdQ', 'max']
         listCellTypes = dfSingleCellRNASummaryStats['Non.malignant'].unique().tolist()
 
@@ -1397,6 +1398,7 @@ class PreProc:
             for strStat in listSingleCellStats:
                 listOutColumns.append(strCellType + '_' + strStat)
 
+		# create an output dataframe for the single-cell RNA-seq data
         dfSingleCellDataForOutput = \
             pd.DataFrame(data=np.nan*np.ones((len(listInitialNKMarkerHGNC),
                                               len(listCellTypes)*len(listSingleCellStats))),
@@ -1419,8 +1421,10 @@ class PreProc:
                         else:
                             a=1
 
+		# combine the gene information with the single cell data
         dfAllNKGenes = dfAllNKGenes.join(dfSingleCellDataForOutput.reindex(dfAllNKGenes.index.tolist()))
 
+		# Output a table with the curated gene list and all associated information (this corresponds to Table S1 of the manuscript)
         dfAllNKGenes.reindex(sorted(listInitialNKMarkerHGNC)).to_csv(
             os.path.join(Plot.strOutputFolder, 'NK_genes_curated.tsv'),
                             header=True,
@@ -1791,11 +1795,10 @@ class Plot:
         handColorBarPVals.update_ticks()
         handFig.text(structAxPos.x0 - structAxPos.width,
                      structAxPos.y0 + 0.5*structAxPos.height,
-                     '-log$_{10}$($p$-value)',
+                     'log$_{10}$($p$-value)',
                      ha='center', va='center',
                      rotation=90,
                      fontsize=0.7*Plot.numFontSize)
-
 
         handFig.text(structAx1Pos.x0 - 0.48*structAx1Pos.width,
                      structAx1Pos.y0 + 1.02*structAx1Pos.height,
@@ -4180,6 +4183,7 @@ class Plot:
 
         numImmScoreThresh = -0.10
 
+		# Load a processed dictionary with the original TCGA 'Immune' gene set and classifications for immune high/low
         dictTCGAClassifications = PreProc.tcga_skcm_classifications()
 
         # load the TCGA data as a merged pandas dataframe
@@ -5654,7 +5658,7 @@ class Plot:
 # Execute the associated functions as required
 # _ = PreProc.refine_NK_signature()
 
-# _ = Plot.fig_one_and_supp_table_one()
+_ = Plot.fig_one_and_supp_table_one()
 # _ = Plot.fig_two()
 
 # _ = Plot.fig_four()
